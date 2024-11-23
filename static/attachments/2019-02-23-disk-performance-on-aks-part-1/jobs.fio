@@ -1,0 +1,70 @@
+[global]
+ioengine=libaio   # sync|libaio|mmap
+group_reporting
+thread
+size=10g          # Size of test file
+cpus_allowed=1    # Only use this CPU core
+runtime=300s      # Run test for 5 minutes
+
+[test1]
+filename=/tmp/fio-test-file
+direct=1          # If value is true, use non-buffered I/O. Non-buffered I/O usually means O_DIRECT
+readwrite=write   # read|write|randread|randwrite|readwrite|randrw
+iodepth=1         # How many operations to queue to the disk
+blocksize=4k
+
+[test2]
+filename=/data/fio-test-file
+direct=0
+readwrite=write
+iodepth=1
+blocksize=4k
+
+[test3]
+filename=/data/fio-test-file
+direct=1
+readwrite=write
+iodepth=1
+blocksize=4k
+
+[test4]
+filename=/data/fio-test-file
+direct=1
+readwrite=write
+iodepth=16
+blocksize=4k
+
+[test5]
+filename=/data/fio-test-file
+direct=1
+readwrite=write
+iodepth=1
+blocksize=128k
+
+[test6]
+filename=/data/fio-test-file
+direct=0
+readwrite=write
+iodepth=1
+blocksize=256k
+
+[test7]
+filename=/data/fio-test-file
+direct=0
+readwrite=randwrite
+iodepth=1
+blocksize=4k
+
+[test8]
+filename=/data/fio-test-file
+direct=0
+readwrite=randwrite
+iodepth=16
+blocksize=256k
+
+[test9]
+filename=/data/fio-test-file
+direct=0
+readwrite=randwrite
+iodepth=16
+blocksize=4k
