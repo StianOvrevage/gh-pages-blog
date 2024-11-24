@@ -11,7 +11,9 @@ tags:
 excerpt_separator: <!--more-->
 ---
 
-# Kubernetes Sidecar Config Drift
+*This is a cross-post of a blog post also published on the [Signicat Blog](https://www.signicat.com/blog/kubernetes-your-sidecar-configurations-are-drifting)*
+
+---
 
 Huge thanks to one of my favorite clients, [Signicat](https://www.signicat.com/), and especially [Jon](https://www.linkedin.com/in/jon-skarpeteig/), for allowing me to share some of the nitty gritty details of a challenge that I believe is probably quite widespread, yet under-appreciated, in modern Kubernetes cloud environments.
 
