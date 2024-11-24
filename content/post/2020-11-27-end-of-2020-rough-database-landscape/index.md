@@ -1,7 +1,8 @@
 ---
 title: "End of 2020 rough database landscape"
+description: "This post is an attempt to lay out the rough landscape of databases that you might encounter or consider as of late 2020."
 date: 2020-11-27 00:00:00 +0000
-image: map-nosql.png
+image: 2020-11-27-end-of-2020-rough-database-landscape.png
 categories:
     - technology
 tags: 

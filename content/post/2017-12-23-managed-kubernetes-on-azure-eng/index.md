@@ -1,7 +1,8 @@
 ---
 title:  "Managed Kubernetes on Microsoft Azure (English)"
+description: "In this post we will set up a managed Kubernetes cluster from scratch using Azure CLI."
 date:   2017-12-29 00:00:00 +0000
-image: minecraft-k8s.png
+image: 2017-12-23-managed-kubernetes-on-azure-eng.png
 categories:
     - technology
 tags: 

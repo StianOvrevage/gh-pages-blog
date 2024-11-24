@@ -1,7 +1,8 @@
 ---
 title: "Next generation monitoring with OpenTSDB"
+description: Step by step guide on how to install a single-instance of OpenTSDB using the latest versions of Hadoop and HBase.
 date: 2014-06-02 19:56:40 +0000
-image: Figure1.png
+image: 2014-06-02-next-generation-monitoring-using-opentsdb.png
 categories:
     - technology
 tags: 

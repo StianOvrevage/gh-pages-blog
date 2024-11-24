@@ -1,8 +1,9 @@
 ---
 layout: post
 title: "Mini-post: Down-scaling Azure Kubernetes Service (AKS)"
+description: "Looking into caveats of running Kubernetes on AKS with small node sizes and node counts."
 date: 2019-06-04 00:00:00 +0000
-image: calico-node-cpu.png
+image: 2019-06-04-downscaling-aks.png
 categories:
     - technology
 tags: 
@@ -15,7 +16,7 @@ We discovered today that some implicit assumptions we had about AKS at smaller s
 
 Suddenly new workloads and jobs in our Radix CI/CD could not start due to insufficient resources (CPU & memory).
 
-Even though it only caused problems in development environments with smaller node sizes it still surprised some of our developers, since we  expected the size of development clusters to have enough resources.
+Even though it only caused problems in development environments with smaller node sizes it still surprised some of our developers, since we expected the size of development clusters to have enough resources.
 
 I thought it would be a good chance to go a bit deeper and verify some of our assumptions and also learn more about various components that usually "just works" and isn't really given much thought.
 
@@ -48,7 +49,7 @@ Allocatable:
  memory:                         1814948Ki
 ```
 
-So we have lost **60 millicores / 6%** of CPU and **1685Mi‬B / 48%** of memory. The next question is if this increases linearly with node size (the percentage of resources lost is the same regardless of node size) or is fixed (always reserves 60 millicores and 1685Mi of memory), or a combination.
+So we have lost **60 millicores / 6%** of CPU and **1685MiB / 48%** of memory. The next question is if this increases linearly with node size (the percentage of resources lost is the same regardless of node size) or is fixed (always reserves 60 millicores and 1685Mi of memory), or a combination.
 
 I connect to another cluster that has double the node size (`Standard DS2 v2`) and compare: 
 

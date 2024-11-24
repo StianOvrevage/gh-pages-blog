@@ -1,5 +1,7 @@
 ---
 title: "A side quest in API development, observability, Kubernetes and cloud with a hint of database"
+description: "Quite often people ask me what I actually do. I have a hard time giving a short answer. Even to colleagues and friends in the industry. Here I will try to show and tell how I spent an evening digging around in a system I helped build for a client."
+image: 2021-03-06-a-side-quest-in-api-dev-operations-cloud-and-database.png
 date: 2021-03-06 00:00:00 +0000
 categories:
     - technology

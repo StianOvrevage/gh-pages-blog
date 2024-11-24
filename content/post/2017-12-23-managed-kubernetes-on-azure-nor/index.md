@@ -1,7 +1,8 @@
 ---
 title:  "Managed Kubernetes på Microsoft Azure (Norwegian)"
+description: "I denne posten setter vi opp et managed Kubernetes cluster fra scratch ved bruk av Azure CLI."
 date:   2017-12-25 00:00:00 +0000
-image: minecraft-k8s.png
+image: 2017-12-23-managed-kubernetes-on-azure.png
 categories:
     - technology
 tags: 

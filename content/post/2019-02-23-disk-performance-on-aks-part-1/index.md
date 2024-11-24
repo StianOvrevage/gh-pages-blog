@@ -1,7 +1,8 @@
 ---
 title: "Disk performance on Azure Kubernetes Service (AKS) - Part 1: Benchmarking"
+description: "In this first post on troubleshooting some disk performance issues on Azure Kubernetes Service (AKS) we will benchmark Azure Premium SSD to find how workloads affect performance and which metrics to monitor to know when troubleshooting potential disk issues."
 date: 2019-02-23 00:00:00 +0000
-image: test1.png
+image: 2019-02-23-disk-performance-on-aks-part-1.png
 categories:
     - technology
 tags: 

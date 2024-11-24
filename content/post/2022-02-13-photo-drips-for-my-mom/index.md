@@ -1,5 +1,7 @@
 ---
 title: "Yak shaving - Photo drips for my mom"
+description: "TL;DR: I finally organized my photo archive and in an evening created a service to e-mail my mom a photo from the last 20 years every morning."
+image: 2022-02-13-photo-drips-for-my-mom.png
 date: 2022-02-13 00:00:00 +0000
 categories:
     - technology

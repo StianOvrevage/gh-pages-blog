@@ -1,8 +1,11 @@
 ---
 title: "Kubernetes Sidecar Config Drift"
+description: "When using a Sidecar Injector (such as Istio), there is nothing that ensures that an update (potentially breaking) to a sidecar config template is applied/updated on Pods that have already been injected with a sidecar. This post describes the causes of this problem, as well as introducing a tool to mitigate it."
+image: 2022-05-03-kubernetes-sidecar-config-drift.png
 date: 2022-05-03 00:00:00 +0000
 categories:
     - technology
+    - tools
 tags:
     - kubernetes
 excerpt_separator: <!--more-->
