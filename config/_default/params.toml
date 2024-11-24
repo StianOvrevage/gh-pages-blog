@@ -6,7 +6,7 @@ rssFullContent = true
 favicon = "/favicon.png"
 
 [footer]
-since = 2020
+since = 2014
 customText = ""
 
 [dateFormat]
@@ -28,7 +28,7 @@ math = false
 readingTime = true
 
 [article.license]
-enabled = true
+enabled = false
 default = "Licensed under CC BY-NC-SA 4.0"
 
 ## Widgets
