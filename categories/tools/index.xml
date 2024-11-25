@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Tools on blog.stian.omg.lol</title><link>https://blog.stian.omg.lol/categories/tools/</link><description>Recent content in Tools on blog.stian.omg.lol</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><lastBuildDate>Tue, 03 May 2022 00:00:00 +0000</lastBuildDate><atom:link href="https://blog.stian.omg.lol/categories/tools/index.xml" rel="self" type="application/rss+xml"/><item><title>Kubernetes Sidecar Config Drift</title><link>https://blog.stian.omg.lol/p/kubernetes-sidecar-config-drift/</link><pubDate>Tue, 03 May 2022 00:00:00 +0000</pubDate><guid>https://blog.stian.omg.lol/p/kubernetes-sidecar-config-drift/</guid><description>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-sidecar-config-drift/2022-05-03-kubernetes-sidecar-config-drift.png" alt="Featured image of post Kubernetes Sidecar Config Drift" />&lt;p>&lt;em>This is a cross-post of a blog post also published on the &lt;a class="link" href="https://www.signicat.com/blog/kubernetes-your-sidecar-configurations-are-drifting" target="_blank" rel="noopener"
+>Signicat Blog&lt;/a>&lt;/em>&lt;/p>
+&lt;hr>
+&lt;p>Huge thanks to one of my favorite clients, &lt;a class="link" href="https://www.signicat.com/" target="_blank" rel="noopener"
+>Signicat&lt;/a>, and especially &lt;a class="link" href="https://www.linkedin.com/in/jon-skarpeteig/" target="_blank" rel="noopener"
+>Jon&lt;/a>, for allowing me to share some of the nitty gritty details of a challenge that I believe is probably quite widespread, yet under-appreciated, in modern Kubernetes cloud environments.&lt;/p>
+&lt;p>Last week, working on Signicat’s next generation cloud platform, I discovered that several individuals invented their own ways of mitigating what I now call Sidecar Configuration Drift.&lt;/p>
+&lt;p>To ease the pain I created &lt;a class="link" href="https://github.com/StianOvrevage/k8s-sidecar-rollout" target="_blank" rel="noopener"
+>k8s-sidecar-rollout&lt;/a> to restart the required workloads and thereby updating their sidecar configurations.&lt;/p>
+&lt;p>This blog post is a bit of background information on what the causes of this problem is.&lt;/p>
+&lt;h2 id="what-is-sidecar-config-drift">What is Sidecar Config Drift?
+&lt;/h2>&lt;p>When using a Sidecar Injector (such as Istio), there is nothing that ensures that an update (potentially breaking) to a sidecar config template is applied/updated on Pods that have already been injected with a sidecar.&lt;/p>
+&lt;p>This means that after updating a sidecar config it may take a very long time until all Pods have the updated config. They may receive the updates at any undetermined time in the future. While the updates are pending things might not work as expected and things may not be compliant. When the update is finally applied to the Pod it may surface breaking changes.&lt;/p>
+&lt;p>I call this phenomena &lt;em>Sidecar Configuration Drift&lt;/em>.&lt;/p>
+&lt;h2 id="background">Background
+&lt;/h2>&lt;h3 id="kubernetes---declarative-vs-imperative">Kubernetes - Declarative vs imperative
+&lt;/h3>&lt;p>What makes Kubernetes so powerful is also what can make it hard and confusing to work with until your mindset has shifted.&lt;/p>
+&lt;p>That is the philosophy of being declarative instead of imperative like most of us are used to for the past 20 years.&lt;/p>
+&lt;p>&lt;strong>Declarative means you tell Kubernetes HOW you want things to look. You DON’T tell Kubernetes WHAT to do.&lt;/strong>&lt;/p>
+&lt;p>For example you do not tell Kubernetes to scale your Deployment to 5 instances. You tell Kubernetes that your Deployment should have 5 instances. The difference is subtle but extremely important. In a highly dynamic cloud environment your instances might disappear or crash for a multitude of reasons. In this declarative mindset you should not care about that since Kubernetes is tasked with ensuring 5 instances and will (try to) provision new ones when it’s needed.&lt;/p>
+&lt;p>This is the apparent magic which makes Kubernetes.&lt;/p>
+&lt;p>This magic is technically solved with what we call &lt;strong>Controllers&lt;/strong>. A controller is responsible for constantly comparing the &lt;strong>Actual state&lt;/strong> and &lt;strong>Desired state&lt;/strong>. To scale your Deployment to 5 instances you set &lt;code>replicas: 5&lt;/code> on the &lt;code>Deployment&lt;/code> resource. If needed a controller will create a completely new &lt;code>ReplicaSet&lt;/code> resource with 5 instances. Another controller will then create 5 &lt;code>Pods&lt;/code>. And the scheduler will finally try to place and start those &lt;code>Pods&lt;/code> on actual nodes. The &lt;code>ReplicaSet&lt;/code> controller will scale down the old once the new has reached it’s desired state.&lt;/p>
+&lt;p>This constant process is called a &lt;strong>reconciliation loop&lt;/strong> and it’s a critical feature.&lt;/p>
+&lt;h3 id="sidecars">Sidecars
+&lt;/h3>&lt;p>Sidecar is a Kubernetes design pattern. A sidecar is simply a container that is living side-by-side with the main application container that can do tasks that are logically not part of the application. Examples of this can be log handling, monitoring agents, proxies. &lt;strong>All containers in a Pod (including sidecars) share the same filesystem, kernel namespace, IP addresses etc.&lt;/strong>&lt;/p>
+&lt;p>More about sidecars: &lt;a class="link" href="https://kubernetes.io/blog/2015/06/the-distributed-system-toolkit-patterns/" target="_blank" rel="noopener"
+>The Distributed System ToolKit: Patterns for Composite Containers&lt;/a>&lt;/p>
+&lt;h3 id="sidecar-injection">Sidecar injection
+&lt;/h3>&lt;p>Sidecar injection is when a sidecar container is added to a Pod &lt;strong>even if the sidecar isn’t defined in any of the higher level primitives, such as &lt;code>Deployment&lt;/code> or &lt;code>StatefulSet&lt;/code>.&lt;/strong>&lt;/p>
+&lt;p>When for example the &lt;code>ReplicaSet&lt;/code> controller will &lt;code>Create&lt;/code> a new &lt;code>Pod&lt;/code>. If configured, the Kubernetes API will call one or more &lt;code>MutatingWebhooks&lt;/code>. These webhooks can then change the &lt;code>Pod&lt;/code> definition before they are saved (and picked up by the scheduler).&lt;/p>
+&lt;h3 id="the-problem">The Problem
+&lt;/h3>&lt;p>The problem is when updating a sidecar injection template there is no system that runs a reconciliation loop.&lt;/p>
+&lt;p>The webhook just updates the &lt;code>Pod&lt;/code> template. It does not keep track of which &lt;code>Pods&lt;/code> have gotten which template or check if any template change would result in a different sidecar configuration.&lt;/p>
+&lt;p>The controllers ALSO does not continuously monitor if and how re-creating the same &lt;code>Pod&lt;/code> (without sidecars) would result in a different Pod once the sidecars have been injected.&lt;/p>
+&lt;p>In effect sidecar injection does not follow the expected declarative pattern that the rest of Kubernetes does.&lt;/p>
+&lt;h3 id="consequences">Consequences
+&lt;/h3>&lt;p>If a platform team changes the istio sidecar template it will not actually take effect on a &lt;code>Pod&lt;/code> until that &lt;code>Pod&lt;/code> for some reason is re-created.&lt;/p>
+&lt;p>Let’s assume the &lt;code>istio-proxy&lt;/code> sidecar template have been updated by the platform team. We roll it out and test it and it seems to work. But the change will break some applications running in the cluster.&lt;/p>
+&lt;p>That breakage will go un-noticed until:&lt;/p>
+&lt;pre>&lt;code>The product team commits changes that triggers a re-deploy. The deployment will suddenly fail but it might not have anything to do with the actual changes the team did to the application. This is surely confusing!
+The platform team for example upgrades a pool of worker nodes causing all `Pods` to be re-created on new nodes.
+A Pod is re-created when a Kubernetes worker node crashes. In this scenario it appears the failure spawned into existence out of nowhere since neither the product team nor platform team actually “did” anything to trigger it.
+&lt;/code>&lt;/pre>
+&lt;p>&lt;strong>Also worth noting is that any attempts at Rolling back a Deployment now containing failing Pods will not actually fix anything.&lt;/strong>&lt;/p>
+&lt;p>It’s the sidecar templates that needs to be rolled back and Pods probably need to be re-created again.&lt;/p>
+&lt;h3 id="mitigations">Mitigations
+&lt;/h3>&lt;p>We can mitigate drift by:&lt;/p>
+&lt;pre>&lt;code>Re-starting all Pods in the cluster whenever we update sidecar injection templates.
+Sometimes we might forget to re-start so regularly re-start all Pods in the cluster anyway.
+&lt;/code>&lt;/pre>
+&lt;h2 id="k8s-sidecar-rollout">k8s-sidecar-rollout
+&lt;/h2>&lt;p>To make these restarts easy and fast I’ve created &lt;a class="link" href="https://github.com/StianOvrevage/k8s-sidecar-rollout" target="_blank" rel="noopener"
+>https://github.com/StianOvrevage/k8s-sidecar-rollout&lt;/a> .&lt;/p>
+&lt;p>It’s a tool that figures out (with your help) which workloads (Deployment, StatefulSet, DaemonSet) that needs to be rolled out again (re-started) and then rolls out for you. Head over to the GitHub repo for installation and complete usage instructions. Here is an example of how it can be used:&lt;/p>
+&lt;pre>&lt;code>python3 sidecar-rollout.py \
+--sidecar-container-name=istio-proxy \
+--include-daemonset=true \
+--annotation-prefix=myCompany \
+--parallel-rollouts 10 \
+--only-started-before=&amp;quot;2022-05-01 13:00&amp;quot; \
+--exclude-namespace=kube-system \
+--confirm=true
+&lt;/code>&lt;/pre>
+&lt;p>This will gather all Pods with a container named &lt;code>istio-sidecar&lt;/code> belonging to a Deployment or DaemonSet that was started before 2022-05-01 13:00 (which may be when we updated the istio sidecar config template) excluding the &lt;code>kube-system&lt;/code> namespace. It will patch the workloads with two annotations with &lt;code>myCompany&lt;/code> prefix and run 10 rollouts in parallel.&lt;/p>
+&lt;p>The script that now re-starts Pods adds two annotations indicating that a restart to update sidecars has occurred as well as the time:&lt;/p>
+&lt;pre>&lt;code>$ kubectl get pods -n product-team some-api-7cdc65482b-ged13 -o yaml | yq '.metadata.annotations'
+sidecarRollout.rollout.timestamp: 2022-05-03T18:05:31
+sidecarRollout.rollout.reason: Update sidecars istio-proxy
+&lt;/code>&lt;/pre>
+&lt;p>The idea is that if your Pods are suddenly failing, you can quickly check the annotations and see if it has anything to do with sidecar updates or not.&lt;/p>
+&lt;p>These annotations will of course disappear again when a Deployment is updated.&lt;/p></description></item></channel></rss>
