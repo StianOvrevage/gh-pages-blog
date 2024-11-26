@@ -132,49 +132,39 @@ Now we install it in the cluster:
 kubectl apply -n istio-system -f istio-envoy-custom-bootstrap-config.yaml
 ```
 
-Next up we patch the `istio-ingressgateway` Deployment to mount the file from the ConfigMap, and instruct istio to use the file as a bootstrap override. Create a file `patch-ingressgateway.yaml` that looks like this:
+Then we can use an [overlay](https://istio.io/latest/docs/setup/additional-setup/customize-installation/) to modify the Deployment that `istioctl` produces, before `istioctl` actually installs it in the cluster. This is the path and contents of what you need to add to your existing IstioOperator that you feed to `istioctl`:
 
 ```yaml
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
 spec:
-  template:
-    spec:
-      containers:
-      - name: istio-proxy
-        env:
-        - name: ISTIO_BOOTSTRAP_OVERRIDE
-          value: /etc/istio/custom-bootstrap/custom_bootstrap.yaml
-        volumeMounts:
-        - mountPath: /etc/istio/custom-bootstrap
-          name: custom-bootstrap-volume
-          readOnly: true
-      volumes:
-      - configMap:
-          name: istio-envoy-custom-bootstrap-config
-          defaultMode: 420
-          optional: false
-        name: custom-bootstrap-volume
+  components:        
+    ingressGateways:
+      - name: istio-ingressgateway
+        k8s:
+          overlays:
+            - kind: Deployment
+              name: istio-ingressgateway
+              patches:
+                - path: spec.template.spec.containers.[name:istio-proxy].env[-1]
+                  value:
+                    name: ISTIO_BOOTSTRAP_OVERRIDE
+                    value: /etc/istio/custom-bootstrap/custom_bootstrap.yaml
+                - path: spec.template.spec.containers.[name:istio-proxy].volumeMounts[-1]
+                  value:
+                    mountPath: /etc/istio/custom-bootstrap
+                    name: custom-bootstrap-volume
+                    readOnly: true
+                - path: spec.template.spec.volumes[-1]
+                  value:
+                    configMap:
+                      name: istio-envoy-custom-bootstrap-config
+                      defaultMode: 420
+                      optional: false
+                    name: custom-bootstrap-volume
 ```
 
-And patch the Deployment (adjusting the name of the deployment as necessary):
-
-```bash
-kubectl patch deployment -n istio-system <ingressgateway-deployment> --patch "$(cat patch-ingressgateway.yaml)"
-```
-
-> Ideally we would like to have a more GitOps way of declaring this change, for example through the [overlays feature of istio](https://istio.io/latest/docs/setup/additional-setup/customize-installation/). But like [many](https://github.com/istio/istio/issues/27188) [others](https://stackoverflow.com/questions/61331425/istio-complicated-k8sobjectoverlay-pathvalue) I have not been able to do that as adding environment variables and volumemounts always overwrites existing and necessary values, borking everything. I also wonder if the reason the customization docs do not actually have examples of adding, only replacing or deleting, is that this isn't easy/possible.
-
-If you need to disable the custom bootstrap from a script for example, you can run this patch which will unset the `ISTIO_BOOTSTRAP_OVERRIDE` env variable, causing the Pods to be recreated without custom bootstrap configuration:
-
-```yaml
-spec:
-  template:
-    spec:
-      containers:
-      - name: istio-proxy
-        env:
-        - name: ISTIO_BOOTSTRAP_OVERRIDE
-          value: ""
-```
+> Huge shoutout to our emminent [Csaba](https://www.linkedin.com/in/csaba-k%C3%A1rp%C3%A1ti-4a229086/) which helped me out actually getting the overlay above work.
 
 <a id="envoyfilter"></a>
 # Configuring buffer sizes and connection timeouts via EnvoyFilter
