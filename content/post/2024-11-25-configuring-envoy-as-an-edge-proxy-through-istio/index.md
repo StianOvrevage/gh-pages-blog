@@ -166,7 +166,7 @@ spec:
                     name: custom-bootstrap-volume
 ```
 
-> Huge shoutout to our emminent [Csaba](https://www.linkedin.com/in/csaba-k%C3%A1rp%C3%A1ti-4a229086/) which helped me out actually getting the overlay above work.
+> Huge shoutout to our eminent [Csaba](https://www.linkedin.com/in/csaba-k%C3%A1rp%C3%A1ti-4a229086/) which helped me out actually getting the overlay above work.
 
 <a id="envoyfilter"></a>
 # Configuring buffer sizes and connection timeouts via EnvoyFilter
