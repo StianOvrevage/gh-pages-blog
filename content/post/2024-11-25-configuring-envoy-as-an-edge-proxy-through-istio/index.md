@@ -21,6 +21,8 @@ tags:
 
 *This is a cross-post of a blog post also published on the [Signicat Blog]()*
 
+> We deployed this with Istio 1.23 and the Envoy edge proxy recommendations as of November 2024.
+
 <a id="introduction"></a>
 # Introduction
 
