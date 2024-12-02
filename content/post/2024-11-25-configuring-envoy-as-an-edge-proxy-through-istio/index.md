@@ -13,7 +13,7 @@ tags:
 - [Introduction](#introduction)
 - [Configuring overload manager and global connection limits using a custom Envoy bootstrap](#custom-bootstrap)
 - [Configuring buffer sizes and connection timeouts via EnvoyFilter](#envoyfilter)
-- [Appendixes](#appendixes)
+- [Appendices](#appendices)
   - [Appendix A - Displaying currently active Envoy edge configuration settings](#appendix-get-envoy-config)
   - [Appendix B - Overload manager metrics](#appendix-overload-manager-metrics)
   - [Appendix C - istio installation and configuration at Signicat](#appendix-istio-at-signicat)
@@ -237,8 +237,8 @@ And install it like usual:
 kubectl apply -n istio-system -f listener-filters-edge.yaml
 ```
 
-<a id="appendixes"></a>
-# Appendixes
+<a id="appendices"></a>
+# Appendices
 
 <a id="appendix-get-envoy-config"></a>
 ## Appendix A - Displaying currently active Envoy edge configuration settings

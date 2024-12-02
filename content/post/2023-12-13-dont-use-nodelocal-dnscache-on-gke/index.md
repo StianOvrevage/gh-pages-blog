@@ -21,7 +21,7 @@ tags:
   - [Istio / Envoy metrics](#istio-envoy-metrics)
   - [Reproducing and troubleshooting HTTP connection problems](#reproducing)
   - [Troubleshooting potentially slow or broken DNS lookups](#troubleshooting-dns)
-- [Appendixes](#appendixes)
+- [Appendices](#appendices)
   - [Appendix - Enabling additional envoy metrics](#appendix-enabling-additional-envoy-metrics)
   - [Appendix - Overview of DNS on GKE](#appendix-overview-of-dns-on-gke)
   - [Appendix - Reducing DNS lookups in Kubernetes and GKE](#appendix-reducing-dns-lookups)
@@ -329,8 +329,8 @@ At this point I feel we have a pretty good grasp of how all of this conspires to
 
 But until that becomes a reality I think the best option is to avoid using NodeLocal DNSCache in combination with `kube-dns`, and instead replace `kube-dns` with Cloud DNS.
 
-<a id="appendixes"></a>
-# Appendixes
+<a id="appendices"></a>
+# Appendices
 
 <a id="appendix-enabling-additional-envoy-metrics"></a>
 ## Appendix - Enabling additional envoy metrics
