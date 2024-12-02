@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Side-Quests on blog.stian.omg.lol</title><link>https://blog.stian.omg.lol/categories/side-quests/</link><description>Recent content in Side-Quests on blog.stian.omg.lol</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><lastBuildDate>Sun, 13 Feb 2022 00:00:00 +0000</lastBuildDate><atom:link href="https://blog.stian.omg.lol/categories/side-quests/index.xml" rel="self" type="application/rss+xml"/><item><title>Yak shaving - Photo drips for my mom</title><link>https://blog.stian.omg.lol/p/yak-shaving-photo-drips-for-my-mom/</link><pubDate>Sun, 13 Feb 2022 00:00:00 +0000</pubDate><guid>https://blog.stian.omg.lol/p/yak-shaving-photo-drips-for-my-mom/</guid><description>&lt;img src="https://blog.stian.omg.lol/p/yak-shaving-photo-drips-for-my-mom/2022-02-13-photo-drips-for-my-mom.png" alt="Featured image of post Yak shaving - Photo drips for my mom" />&lt;h1 id="yak-shaving---photo-drips-for-my-mom">Yak shaving - Photo drips for my mom
+&lt;/h1>&lt;p>Update: Check out &lt;a class="link" href="https://github.com/StianOvrevage/photo-drips" target="_blank" rel="noopener"
+>https://github.com/StianOvrevage/photo-drips&lt;/a> for ugly but working code.&lt;/p>
+&lt;blockquote>
+&lt;p>Update May 2022: My mom told me this week that I must NEVER stop sending these daily photos &amp;lt;3&lt;/p>
+&lt;/blockquote>
+&lt;h2 id="background">Background
+&lt;/h2>&lt;p>&lt;strong>TL;DR: I finally organized my photo archive and in an evening created a service to e-mail my mom a photo from the last 20 years every morning.&lt;/strong>&lt;/p>
+&lt;p>This started out a few weeks ago when I decided to reinstall Windows on my laptop.&lt;/p>
+&lt;p>The first hurdle was that my 2-3-4 different cloud storage subscriptions were all overdue for a clean-up. The one best suited had me throttled to 1Mbit/s since I was storing 20TB+ of data.&lt;/p>
+&lt;p>I’ve been taking a lot of photos and videos since I got my first digital camera 22 years ago. Even though I use Lightroom to keep some order there was some duplication and discontinuity. So (after upgrading my fibreoptic internet to 1Gbit, optimizing my home network and cleaning up space on my machine) I started to clean up and organize the various catalogues.&lt;/p>
+&lt;p>Looking at memories from 20 years ago made me realize I’m better at taking photos than “utilizing” them afterwards. What really is the point, then? I took a picture of one on the screen with my phone and sent on snapchat to my mom, not thinking much about it. But she was really thrilled, which made me really happy as well.&lt;/p>
+&lt;p>For my current client I’m nearing the end of my contract and for the last two months I’ve mainly been maintaining, documenting and handing over and I really miss building things and solving problems.&lt;/p>
+&lt;p>Recently a potential client asked about Python and AWS Lambda competence. It’s not something I work with daily and it’s not on my CV. But it made me think about all the various languages and tools I’ve used during the last decade.&lt;/p>
+&lt;p>My subconscious brain offers up an idea on how to a) build something b) brush up some Python and Lambda knowledge and c) brighten my moms day.&lt;/p>
+&lt;h3 id="concept">Concept
+&lt;/h3>&lt;p>Every morning a photo from my archives is e-mailed to my mom, a photo drip.&lt;/p>
+&lt;p>There is also a gallery where she can look at the previous photo drips.&lt;/p>
+&lt;h3 id="process-and-goals">Process and goals
+&lt;/h3>&lt;p>The primary objective was to have a working prototype as quickly as possible. So no premature optimization, refactoring or anything.&lt;/p>
+&lt;h2 id="photo-selection-and-preparation">Photo selection and preparation
+&lt;/h2>&lt;p>At around 3pm I started browsing photos from year 2000. It took me about 75 minutes to pick out about 300 photos from the first 20.000.&lt;/p>
+&lt;p>Tip: When browsing in Lightroom, press B to add to Quick Collection.&lt;/p>
+&lt;p>Export the pictures in the quick collection with a custom filename format like this &lt;code>0003-2000-05-14.jpg&lt;/code>.&lt;/p>
+&lt;p>This format ensures filenames are ordered from oldest to newest, and the date can later be extracted directly from the filename without doing any EXIF stuff.&lt;/p>
+&lt;p>Photos resized to 1500x1500. Never enlarge. Sharpen for screen.&lt;/p>
+&lt;h2 id="photo-storage">Photo storage
+&lt;/h2>&lt;p>It would have been quicker to set up a AWS EC2 virtual machine running all the components but that would be too easy.&lt;/p>
+&lt;p>The requirements for storage is: cheap, reliable, publicly available. So a standard AWS S3 bucket should do just fine.&lt;/p>
+&lt;p>Using the browser I upload all the photos in batch to a new bucket. In a sub-folder with a random name. That should provide an appropriate level of security and avoid strangers on the internet stumbling upon it. Since the bucket is publicly available.&lt;/p>
+&lt;p>I verify that I can load the pictures in my browser with the public S3 URL. It took a few attempts at getting the permissions right, and I suspect adding this policy was required even though everything in the settings was set to “Full public access”.&lt;/p>
+&lt;pre>&lt;code>{
+&amp;quot;Version&amp;quot;: &amp;quot;2012-10-17&amp;quot;,
+&amp;quot;Statement&amp;quot;: [
+{
+&amp;quot;Sid&amp;quot;: &amp;quot;PublicRead&amp;quot;,
+&amp;quot;Effect&amp;quot;: &amp;quot;Allow&amp;quot;,
+&amp;quot;Principal&amp;quot;: &amp;quot;*&amp;quot;,
+&amp;quot;Action&amp;quot;: [
+&amp;quot;s3:GetObject&amp;quot;,
+&amp;quot;s3:GetObjectVersion&amp;quot;
+],
+&amp;quot;Resource&amp;quot;: [
+&amp;quot;arn:aws:s3:::memorydrops/*&amp;quot;
+]
+}
+]
+}
+&lt;/code>&lt;/pre>
+&lt;h2 id="sending-the-e-mail">Sending the e-mail
+&lt;/h2>&lt;p>Sending e-mails directly with SMTP is really not an option anymore because of all the spam blocking systems. I know we need to use a third party service or something.&lt;/p>
+&lt;p>I first looked at AWS SES (simple-email-service). But nothing about it seemed simple. Then looked at a few of the stablished ones such as SendGrid and Mailgun. These tools have evolved a lot and now has a plethora of features aimed at marketing, transactional e-mails etc. Probably overkill and potentially time consuming while having no transferable knowledge or code when hitting a dead-end since they are all different APIs.&lt;/p>
+&lt;p>What about just using my own Gmail SMTP to ship?&lt;/p>
+&lt;p>The first tutorials about that required turning on “Less secure app access” for my account.&lt;/p>
+&lt;p>Not accepting that trade-off, I found &lt;a class="link" href="https://levelup.gitconnected.com/an-alternative-way-to-send-emails-in-python-5630a7efbe84" target="_blank" rel="noopener"
+>https://levelup.gitconnected.com/an-alternative-way-to-send-emails-in-python-5630a7efbe84&lt;/a> where I learned that I can generate an “App password”, similar to an API Key for specific Google applications without disabling other security features. Jackpot!&lt;/p>
+&lt;p>The article also has working code that I shamelessly used as a starting point.&lt;/p>
+&lt;p>First I attached the photo of the day, but I really want it embedded. Even though I don’t really like linking images on a public URL (S3 bucket) because of potential browser and client issues that’s what I ended up with. The alternative of base64 encoding the data inline seemed like a chore. Besides I know mom uses Gmail in Chrome anyway so if it worked for me it would probably work for her.&lt;/p>
+&lt;p>I don’t want the system to be dependent on any state management, databases, etc.&lt;/p>
+&lt;p>Picking the right photo each day is simply select file N, where N is the days since the first deployment.&lt;/p>
+&lt;p>Ideally I would use AWS S3 API to list the contents of the bucket to get the available files. But to save some time the “photo index” is simply a text file listing the files:&lt;/p>
+&lt;pre>&lt;code>ls &amp;gt; filelist.txt
+&lt;/code>&lt;/pre>
+&lt;p>I create a new Lambda function and paste the python script and filelist.txt directly in the Lambda code editor and deploy and test it. Working!&lt;/p>
+&lt;p>The Lambda function is the configured with a EventBridge trigger with the schedule &lt;code>cron(0 5 * * ? *)&lt;/code> that should trigger the function at 0500 UTC every day.&lt;/p>
+&lt;h2 id="gallery">Gallery
+&lt;/h2>&lt;p>I also want to have a gallery where she can view the previous memory drops without having to shuffle through endless emails.&lt;/p>
+&lt;p>Started out by looking at VueJS for the frontend, which I have used before. But I have not used the new version yet and I suspected it might take a long time getting a project set up from scratch since unfortunately tutorials, tips, documentation in the frontend / JavaScript world has a tendency to be chronically outdated and unreliable.&lt;/p>
+&lt;p>Dropped that and opted for a very simple native JS photo gallery called &lt;a class="link" href="https://github.com/ericleong/zoomwall.js/" target="_blank" rel="noopener"
+>zoomwall.js&lt;/a>.&lt;/p>
+&lt;p>Only showing a selection of photos depending on the day however requires a bit more engineering. (Writing this I realize another acceptable approach would be to use native JS to manipulate the DOM directly.)&lt;/p>
+&lt;p>I implemented this by inlining the CSS and JS into one template HTML file that is rendered on-demand in a Python Lambda function. Then using AWS API Gateway to expose it as a normal webserver.&lt;/p>
+&lt;p>I wanted to use Jinja2 for templating instead of the built-in Python templating functions. Doing that causes some headache since the Lambda environment does not have Jinja2 installed.&lt;/p>
+&lt;p>Luckily creating a custom deployment package (.zip) including dependencies is rather trivial.&lt;/p>
+&lt;h2 id="conclusion">Conclusion
+&lt;/h2>&lt;p>All in all this project was started with filtering photos at 3pm, having dinner from 5pm to 6pm and by 8.30pm everything was deployed. The following morning I had the memory drop in my inbox to great delight. An unexpected benefit of using my own Gmail for sending the e-mail is that mom can reply directly.&lt;/p>
+&lt;p>Expected costs&lt;/p>
+&lt;pre>&lt;code>S3 offers 5GB of standard storage for free for 12 months. After that I expect the cost to be in the $0.x range per month.
+API Gateway offers 1 Million API calls per month for free for 12 months. After that I expect the cost to be in the $0.x range per month.
+Lambda offers 1 Million requests per month forever.
+&lt;/code>&lt;/pre>
+&lt;p>Performance has been sacrificed for the gallery to make it simple. Server-side rendering is not going to be as fast as client-side. Python is not the fastest alternative. Using a FaaS such as Lambda also introduces penalties and unknowns (cold starts, etc). Yet the gallery HTML loads in ~200ms and and seems instant.&lt;/p>
+&lt;h2 id="improvements">Improvements
+&lt;/h2>&lt;p>After deciding to share the code I spent an hour or two writing this document as well as some necessary clean-up and changes from the prototype.&lt;/p>
+&lt;p>The &lt;code>filelist.txt&lt;/code> is not bundled with the code. It’s hosted in the S3 bucket along with the photos. That means I can update and add photos later without touching code.&lt;/p>
+&lt;p>That requires the &lt;code>requests&lt;/code> package, so now both modules are packaged with dependencies and uploaded via AWS CLI instead of browser.&lt;/p>
+&lt;p>Some hard-coded URLs etc have been converted to environment variables.&lt;/p>
+&lt;p>Added the &lt;code>exif&lt;/code> Python package to extract the original time and date of the photo to include in the e-mail.&lt;/p>
+&lt;p>Added an URL redirect from a prettier domain to the auto generated API Gateway hostname of the gallery. Did not bother with proper custom domain since that requires a lot of fiddling with SSL certificates.&lt;/p>
+&lt;h2 id="bugs-and-future-improvements">Bugs and future improvements
+&lt;/h2>&lt;ul>
+&lt;li>The JS gallery seems slightly broken. Might replace with a better one.&lt;/li>
+&lt;li>The e-mail HTML is not pretty.&lt;/li>
+&lt;li>Make sender and recipient e-mails environment variables (but recipient is currently a Python list, so).&lt;/li>
+&lt;li>Make start date env var. Requires parsing date from user.&lt;/li>
+&lt;li>The usual: Check that required env vars are set on startup. Improve error handling and logging.&lt;/li>
+&lt;/ul></description></item></channel></rss>

@@ -1,0 +1,840 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Dns on blog.stian.omg.lol</title><link>https://blog.stian.omg.lol/tags/dns/</link><description>Recent content in Dns on blog.stian.omg.lol</description><generator>Hugo -- gohugo.io</generator><language>en-us</language><lastBuildDate>Wed, 13 Dec 2023 00:00:00 +0000</lastBuildDate><atom:link href="https://blog.stian.omg.lol/tags/dns/index.xml" rel="self" type="application/rss+xml"/><item><title>Kubernetes: Don't use NodeLocal DNSCache on GKE (without Cloud DNS)</title><link>https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/</link><pubDate>Wed, 13 Dec 2023 00:00:00 +0000</pubDate><guid>https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/</guid><description>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/cover.webp" alt="Featured image of post Kubernetes: Don't use NodeLocal DNSCache on GKE (without Cloud DNS)" />&lt;ul>
+&lt;li>&lt;a class="link" href="#introduction" >Introduction&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#tl-dr" >TL;DR:&lt;/a>
+&lt;ul>
+&lt;li>&lt;a class="link" href="#nodelocal-dnscache-coredns" >NodeLocal DNSCache / CoreDNS&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#kubedns-dnsmasq" >kube-dns / dnsmasq&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#am-i-affected" >Am I affected?&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;a class="link" href="#investigation" >Investigation&lt;/a>
+&lt;ul>
+&lt;li>&lt;a class="link" href="#the-initial-problem" >The initial Problem&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#istio-envoy-metrics" >Istio / Envoy metrics&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#reproducing" >Reproducing and troubleshooting HTTP connection problems&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#troubleshooting-dns" >Troubleshooting potentially slow or broken DNS lookups&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;a class="link" href="#appendices" >Appendices&lt;/a>
+&lt;ul>
+&lt;li>&lt;a class="link" href="#appendix-enabling-additional-envoy-metrics" >Appendix - Enabling additional envoy metrics&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-overview-of-dns-on-gke" >Appendix - Overview of DNS on GKE&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-reducing-dns-lookups" >Appendix - Reducing DNS lookups in Kubernetes and GKE&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-overview-of-gke-dns-with-nodelocal-dnscache" >Appendix - Overview of GKE DNS with NodeLocal DNSCache&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-enabling-node-local-dns-metrics" >Appendix - Enabling node-local-dns metrics&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-using-dnsperf" >Appendix - Using dnsperf to test DNS performance&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-network-packet-capture" >Appendix - Network packet capture without dependencies&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-verbose-logging-on-kube-dns" >Appendix - Verbose logging on kube-dns&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-analyzing-dnsmasq-logs" >Appendix - Analyzing dnsmasq logs&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#appendix-analyzing-concurrent-tcp-connections" >Appendix - Analyzing concurrent TCP connections&lt;/a>&lt;/li>
+&lt;li>&lt;a class="link" href="#analyzing-dns-problems-based-on-packet-capture" >Appendix - Analyzing DNS problems based on packet captures&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;a class="link" href="#footnotes" >Footnotes&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;p>&lt;em>This is a cross-post of a blog post also published on the &lt;a class="link" href="https://www.signicat.com/blog/dont-use-nodelocal-dnscache-on-gke" target="_blank" rel="noopener"
+>Signicat Blog&lt;/a>&lt;/em>&lt;/p>
+&lt;p>&lt;a id="introduction">&lt;/a>&lt;/p>
+&lt;h1 id="introduction">Introduction
+&lt;/h1>&lt;p>Last year I was freelancing as a consultant in Signicat and recently I returned, now as an actual employee!&lt;/p>
+&lt;p>The first week after returning, a tech lead for another team reaches out to me about a technical issue he&amp;rsquo;s been struggling with.&lt;/p>
+&lt;p>In this blog post I&amp;rsquo;ll try to guide you through the troubleshooting with actionable take-aways. It appears it&amp;rsquo;s going to be a long one with a lot of detours, so I&amp;rsquo;ve summarized our findings and recommendations here on the top starting right below this introduction. There are a few appendixes at the end that I&amp;rsquo;ve tried to make self-contained as to make them useful in other contexts and without necessarily having to follow the main story.&lt;/p>
+&lt;p>If you don&amp;rsquo;t want any spoilers but follow the bumpy journey from start to end, fill your coffee mug and skip ahead to &lt;a class="link" href="#investigation" >Investigation&lt;/a>.&lt;/p>
+&lt;p>&lt;a id="tl-dr">&lt;/a>&lt;/p>
+&lt;h1 id="tldr">TL;DR:
+&lt;/h1>&lt;p>Due to an unfortunate combination of behaviour of &lt;a class="link" href="https://coredns.io/manual/toc/" target="_blank" rel="noopener"
+>CoreDNS&lt;/a> (which NodeLocal DNSCache uses) and &lt;a class="link" href="https://github.com/kubernetes/dns" target="_blank" rel="noopener"
+>kube-dns&lt;/a> (which is the default on GKE) &lt;strong>I recommend NOT using them in combination.&lt;/strong>&lt;/p>
+&lt;p>Since &lt;a class="link" href="https://cloud.google.com/knowledge/kb/how-to-run-coredns-on-kubernetes-engine-000004698" target="_blank" rel="noopener"
+>GKE does not offer CoreDNS as a managed option&lt;/a> for &lt;code>kube-dns&lt;/code> (even though &lt;a class="link" href="https://kubernetes.io/blog/2018/12/03/kubernetes-1-13-release-announcement/" target="_blank" rel="noopener"
+>Kubernetes made CoreDNS the default in 1.13 in 2018&lt;/a>) you are left with two options:&lt;/p>
+&lt;ul>
+&lt;li>Not enabling &lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/nodelocal-dns-cache" target="_blank" rel="noopener"
+>NodeLocal DNSCache on GKE&lt;/a>&lt;/li>
+&lt;li>Switching from &lt;code>kube-dns&lt;/code> &lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/cloud-dns" target="_blank" rel="noopener"
+>to Google Cloud DNS&lt;/a>&lt;/li>
+&lt;/ul>
+&lt;p>&lt;em>What is this unfortunate combination you ask?&lt;/em>&lt;/p>
+&lt;p>&lt;a id="nodelocal-dnscache-coredns">&lt;/a>&lt;/p>
+&lt;h2 id="nodelocal-dnscache--coredns">NodeLocal DNSCache / CoreDNS
+&lt;/h2>&lt;p>NodeLocal DNSCache (in GKE at least) is configured with:&lt;/p>
+&lt;pre>&lt;code># kubectl get configmap --namespace kube-system node-local-dns -o yaml | yq .data.Corefile
+cluster.local:53 {
+forward . __PILLAR__CLUSTER__DNS__ {
+force_tcp
+expire 1s
+&lt;/code>&lt;/pre>
+&lt;p>This means CoreDNS will upgrade any and all incoming DNS requests to TCP connections before connecting to &lt;code>dnsmasq&lt;/code> (the first of two containers in a &lt;code>kube-dns&lt;/code> Pod). CoreDNS reuses TCP connections if available. Unused connections in the connection pool should be cleaned up every 1 second (in theory). If no connections are available a new will be created, apparently with no upper bound.&lt;/p>
+&lt;p>This means new connections may be created en-masse when needed, but old connections can take a while (I&amp;rsquo;ve observed 5-10 seconds) before being cleaned up, and most importantly, closed.&lt;/p>
+&lt;p>&lt;a id="kubedns-dnsmasq">&lt;/a>&lt;/p>
+&lt;h2 id="kube-dns--dnsmasq">kube-dns / dnsmasq
+&lt;/h2>&lt;p>&lt;code>dnsmasq&lt;/code> has a &lt;a class="link" href="https://github.com/imp/dnsmasq/blob/master/src/config.h#L18" target="_blank" rel="noopener"
+>hardcoded maximum number of 20 workers&lt;/a>. For us that means each &lt;code>kube-dns&lt;/code> Pod is limited to 20 open connections.&lt;/p>
+&lt;p>&lt;code>kube-dns&lt;/code> scaling is managed by a bespoke kube-dns autoscaler that by default in GKE is &lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/nodelocal-dns-cache#scaling_up_kube-dns" target="_blank" rel="noopener"
+>configured&lt;/a> like:&lt;/p>
+&lt;pre>&lt;code># kubectl get configmap --namespace kube-system kube-dns-autoscaler -o yaml | yq .data.linear
+{&amp;quot;coresPerReplica&amp;quot;:256, &amp;quot;nodesPerReplica&amp;quot;:16,&amp;quot;preventSinglePointFailure&amp;quot;:true}
+&lt;/code>&lt;/pre>
+&lt;ul>
+&lt;li>&lt;code>preventSinglePointFailure&lt;/code> - Run at least two Pods.&lt;/li>
+&lt;li>&lt;code>nodesPerReplica&lt;/code> - Run one &lt;code>kube-dns&lt;/code> Pod for each 16 nodes.&lt;/li>
+&lt;/ul>
+&lt;p>This default setup will have two &lt;code>kube-dns&lt;/code> Pods until your cluster grows beyond 32 nodes.&lt;/p>
+&lt;p>Two &lt;code>kube-dns&lt;/code> Pods have a limit of 40 open TCP connections in total from the &lt;code>node-local-dns&lt;/code> Pods running on each node. The &lt;code>node-local-dns&lt;/code> Pods though are happy to try to open many more TCP connections.&lt;/p>
+&lt;p>GKE kube-dns docs mention &amp;ldquo;&lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/kube-dns#performance_limitations_with_kube-dns" target="_blank" rel="noopener"
+>Performance limitations with kube-dns&lt;/a>&amp;rdquo; as a known issue suggesting enabling NodeLocal DNSCache as a potential fix.&lt;/p>
+&lt;p>And GKE NodeLocal DNSCache docs mention &amp;ldquo;&lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/nodelocal-dns-cache#timeout_issues" target="_blank" rel="noopener"
+>NodeLocal DNSCache timeout errors&lt;/a>&amp;rdquo; as a known issue with the possible reasons being&lt;/p>
+&lt;ul>
+&lt;li>An underlying network connectivity problem. (&lt;em>Spoiler: it probably isn&amp;rsquo;t&lt;/em>)&lt;/li>
+&lt;li>Significantly increased DNS queries from the workload or due to node pool upscaling. (&lt;em>Spoiler: it probably isn&amp;rsquo;t&lt;/em>)&lt;/li>
+&lt;/ul>
+&lt;p>With the fix being&lt;/p>
+&lt;blockquote>
+&lt;p>&lt;strong>&amp;ldquo;The workaround is to increase the number of kube-dns replicas by tuning the autoscaling parameters.&amp;rdquo;&lt;/strong>&lt;/p>
+&lt;/blockquote>
+&lt;p>Increasing the number of &lt;code>kube-dns&lt;/code> Pods will reduce the frequency and impact but not eliminate it. Until we migrate to Cloud DNS we run &lt;code>kube-dns&lt;/code> at a ratio of 1:1.5 of nodes by configuring autoscaling with &lt;code>&amp;quot;coresPerReplica&amp;quot;:24&lt;/code> and using 16 core nodes. Resulting in 12 &lt;code>kube-dns&lt;/code> Pods in a 17 node cluster.&lt;/p>
+&lt;blockquote>
+&lt;p>By looking at the &lt;code>coredns_forward_conn_cache_misses_total&lt;/code> metric I observe it at least increasing by more than 300 in a 15 second metric sampling window for &lt;em>one&lt;/em> &lt;code>node-local-dns&lt;/code> Pod. This means &lt;em>on average&lt;/em> during those 15 seconds 20 new TCP connections were attempted since no existing connection could be re-used. (&lt;a class="link" href="#footnote-a" >Footnote A&lt;/a>)&lt;/p>
+&lt;p>This means even setting &lt;code>&amp;quot;nodesPerReplica&amp;quot;:1&lt;/code> thus running one &lt;code>kube-dns&lt;/code> Pod for each node may not be enough to guarantee not hitting the 20 process limit in &lt;code>dnsmasq&lt;/code> occasionally.&lt;/p>
+&lt;p>I guess you could start lowering &lt;code>coresPerReplica&lt;/code> to have more than one &lt;code>kube-dns&lt;/code> Pod for each node, but now it&amp;rsquo;s getting silly.&lt;/p>
+&lt;/blockquote>
+&lt;p>To re-iterate; If you&amp;rsquo;re using NodeLocal DNSCache and &lt;code>kube-dns&lt;/code> you should plan to migrate to Cloud DNS. You can alleviate the problem in the short term by scaling up &lt;code>kube-dns&lt;/code> aggressively but it will not eliminate occasional latency spikes.&lt;/p>
+&lt;p>&lt;a id="am-i-affected">&lt;/a>&lt;/p>
+&lt;h2 id="am-i-affected">Am I affected?
+&lt;/h2>&lt;p>How do I know if I&amp;rsquo;m affected by this?&lt;/p>
+&lt;ul>
+&lt;li>You are using NodeLocal DNSCache (CoreDNS) and &lt;code>kube-dns&lt;/code> (default on GKE)&lt;/li>
+&lt;li>You see log lines with &lt;code>i/o timeout&lt;/code> in node-local-dns pods (&lt;code>kubectl logs -n kube-system node-local-dns-xxxxx&lt;/code>)&lt;/li>
+&lt;li>You are hitting dnsmasq max procs. Create a graph &lt;code>container_processes{namespace=&amp;quot;kube-system&amp;quot;, container=&amp;quot;dnsmasq&amp;quot;}&lt;/code> or use my &lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/grafana-dashboard-kube-dns.json" target="_blank" rel="noopener"
+>kube-dns Grafana dashboard&lt;/a>. (&lt;a class="link" href="#footnote-b" >Footnote B&lt;/a>).&lt;/li>
+&lt;/ul>
+&lt;p>&lt;a id="investigation">&lt;/a>&lt;/p>
+&lt;h1 id="investigation">Investigation
+&lt;/h1>&lt;p>&lt;a id="the-initial-problem">&lt;/a>&lt;/p>
+&lt;h2 id="the-initial-problem">The initial Problem
+&lt;/h2>&lt;p>We have a microservice architecture and use &lt;a class="link" href="https://www.openpolicyagent.org/" target="_blank" rel="noopener"
+>Open Policy Agent (OPA)&lt;/a> deployed as &lt;a class="link" href="https://kubernetes.io/blog/2015/06/the-distributed-system-toolkit-patterns/#example-1-sidecar-containers" target="_blank" rel="noopener"
+>sidecars&lt;/a> to process and validate request tokens.&lt;/p>
+&lt;p>However, some services were getting timeouts and he suspected it was an issue with &lt;a class="link" href="https://istio.io/" target="_blank" rel="noopener"
+>istio&lt;/a>, a service mesh that provides security and observability for traffic inside Kubernetes clusters.&lt;/p>
+&lt;p>The actual error message showing up in the logs was a generic &lt;code>context deadline exceeded (Client.Timeout exceeded while awaiting headers)&lt;/code> which I recognize as a Golang error probably stemming from a &lt;a class="link" href="https://pkg.go.dev/net/http" target="_blank" rel="noopener"
+>http.Get()&lt;/a> call or similar.&lt;/p>
+&lt;p>The first thing that comes to mind is that last year we made a change in our istio practices. Inside our clusters we call services in other namespaces (crossing team boundaries) using the same FQDN domain and path that our customers would use, not internal Kubernetes names. So internally we&amp;rsquo;re calling &lt;code>api.signicat.com/service&lt;/code> and not &lt;code>service.some-team-namespace&lt;/code>.&lt;/p>
+&lt;p>He had noticed that the problem seemed to have increased when doing the switch from internal DNS names to FQDN.&lt;/p>
+&lt;p>&lt;a id="istio-envoy-metrics">&lt;/a>&lt;/p>
+&lt;h2 id="istio--envoy-metrics">Istio / Envoy metrics
+&lt;/h2>&lt;p>We started troubleshooting by enabling additional metrics in envoy to hopefully be able to confirm that the problem was visible as envoy timeouts or some other kind of error.&lt;/p>
+&lt;blockquote>
+&lt;p>&lt;a class="link" href="https://www.envoyproxy.io/" target="_blank" rel="noopener"
+>Envoy&lt;/a> is the actual software that traffic goes through in an istio service mesh.&lt;/p>
+&lt;/blockquote>
+&lt;p>This turned out to be a dead end and we couldn’t find any signs of timeouts or errors in the envoy metrics.&lt;/p>
+&lt;blockquote>
+&lt;p>&lt;em>Enabling these additional metrics was a bit of a chore and there were a few surprises. Have a look at the &lt;a class="link" href="#appendix-enabling-additional-envoy-metrics" >Enabling additional envoy metrics&lt;/a> appendix for steps and caveats.&lt;/em>&lt;/p>
+&lt;/blockquote>
+&lt;p>&lt;a id="reproducing">&lt;/a>&lt;/p>
+&lt;h2 id="reproducing-and-troubleshooting-http-connection-problems">Reproducing and troubleshooting HTTP connection problems
+&lt;/h2>&lt;p>At this point I&amp;rsquo;m thinking the problem may be something else. Failure to acquire a HTTP connection from the pool or a TCP socket maybe?&lt;/p>
+&lt;p>Using the &lt;a class="link" href="https://pkg.go.dev/net/http/httptrace" target="_blank" rel="noopener"
+>httptrace&lt;/a> golang library I created a small program that would continuously query both the internal &lt;code>some-service.some-namespace&lt;/code> hostname and FQDN &lt;code>api.signicat.com/some-service&lt;/code>, while logging and counting each phase of the HTTP request as well as it&amp;rsquo;s timings.&lt;/p>
+&lt;p>Here is a quick and dirty way of starting the program in an ephemeral Pod:&lt;/p>
+&lt;pre>&lt;code># Start a Pod named `conn-test` using the `golang:latest` image. Attach to it (`-i --tty`) and start `bash`. Delete it after disconnecting (`--rm`):
+kubectl run conn-test --rm -i --tty --image=golang:latest -- bash
+# Create and enter a directory for the program:
+mkdir conn-test &amp;amp;&amp;amp; cd conn-test
+# Initialize a go environment for it:
+go mod init conn-test
+# Download the source:
+wget https://raw.githubusercontent.com/signicat/blog-attachements/main/2023-gke-node-local-dns-cache/files/go-http-connection-test/main.go
+# Download dependencies:
+go mod tidy
+# Configure it (refer to the source for more configuration options):
+export URL_1=http://some-service.some-namespace.svc.cluster.local
+# Start it:
+go run main.go
+&lt;/code>&lt;/pre>
+&lt;blockquote>
+&lt;p>If you need to run it for longer it probably makes sense to build it as a Docker image, upload it to an image registry and create a Deployment for it. It also exposes metrics in Prometheus format so you can also add scraping of the metrics either through annotations or a ServiceMonitor.&lt;/p>
+&lt;/blockquote>
+&lt;p>After a few hours the program crashed, and the last log message indicated that &lt;code>DNSStart&lt;/code> was the last thing to happened. (The program crashed since I just &lt;code>log.Fatal&lt;/code>ed if the request failed, which it did timing out. I since improved that, even though we already learned what we needed).&lt;/p>
+&lt;p>We did some manual DNS lookups using &lt;code>nslookup -debug api.signicat.com&lt;/code> which (obviously, in retrospect) shows 6 failing DNS requests before finally getting it right:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>api.signicat.com.$namespace.svc.cluster.local - NXDOMAIN&lt;/code>&lt;/li>
+&lt;li>&lt;code>api.signicat.com.svc.cluster.local - NXDOMAIN&lt;/code>&lt;/li>
+&lt;li>&lt;code>api.signicat.com.cluster.local - NXDOMAIN&lt;/code>&lt;/li>
+&lt;li>&lt;code>api.signicat.com.$gcp-region.c.$gcp-project.internal - NXDOMAIN&lt;/code>&lt;/li>
+&lt;li>&lt;code>api.signicat.com.c.$gcp-project.internal - NXDOMAIN&lt;/code>&lt;/li>
+&lt;li>&lt;code>api.signicat.com.google.internal - NXDOMAIN&lt;/code>&lt;/li>
+&lt;li>&lt;code>api.signicat.com - OK&lt;/code>&lt;/li>
+&lt;/ul>
+&lt;p>&lt;em>See &lt;a class="link" href="#appendix-overview-of-dns-on-gke" >Overview of DNS on GKE&lt;/a> for a lengthier explanation of why this happens.&lt;/em>&lt;/p>
+&lt;p>The default timeout for HTTP requests in Golang is 5 seconds. DNS resolution &lt;em>should&lt;/em> be fast enough and it shouldn&amp;rsquo;t be a problem to do 7 DNS lookups in that time. But if there is some sluggishness and variability in DNS resolution times the probability of having one slow lookup out of the 7 being slow increases the risk of causing a timeout. In addition, always doing 7 lookups puts additional strain on the DNS infrastructure potentially further exacerbating the probability of slow lookups.&lt;/p>
+&lt;p>From here on we have two courses of action. Figure out if we can reduce the number of DNS lookups as well as figure out if, and why, DNS resolution isn&amp;rsquo;t consistently fast.&lt;/p>
+&lt;p>&lt;em>See &lt;a class="link" href="#appendix-reducing-dns-lookups" >Reducing DNS lookups in Kubernetes and GKE&lt;/a> for some thoughts on reducing these extraneous DNS lookups.&lt;/em>&lt;/p>
+&lt;p>&lt;a id="troubleshooting-dns">&lt;/a>&lt;/p>
+&lt;h2 id="troubleshooting-potentially-slow-or-broken-dns-lookups">Troubleshooting potentially slow or broken DNS lookups
+&lt;/h2>&lt;p>We use &lt;a class="link" href="https://kubernetes.io/docs/tasks/administer-cluster/nodelocaldns/" target="_blank" rel="noopener"
+>NodeLocal DNSCache&lt;/a> which on GKE is &lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/nodelocal-dns-cache" target="_blank" rel="noopener"
+>enabled by clicking the right button&lt;/a>.&lt;/p>
+&lt;blockquote>
+&lt;p>&lt;strong>NodeLocal DNSCache summary&lt;/strong>&lt;/p>
+&lt;p>It is deployed by a ReplicaSet causing one CoreDNS Pod (named &lt;code>node-local-dns-x&lt;/code> in &lt;code>kube-system&lt;/code> namespace) to be running on each node.&lt;/p>
+&lt;p>It adds a listener on the same IP as the &lt;code>kube-dns&lt;/code> Service. Thereby intercepting traffic that would otherwise go to that IP.&lt;/p>
+&lt;p>The &lt;code>node-local-dns&lt;/code> Pod caches both positive and negative results. Domains ending in &lt;code>.cluster.local&lt;/code> are forwarded to &lt;code>kube-dns&lt;/code> in the cluster (but through a new Service called &lt;code>kube-dns-upstream&lt;/code> with a different IP). Requests for other domains are forwarded to 8.8.8.8 and 8.8.4.4.&lt;/p>
+&lt;p>NodeLocal DNSCache instances use a 2 second timeout when querying upstream DNS servers.&lt;/p>
+&lt;p>&lt;em>See &lt;a class="link" href="#appendix-overview-of-gke-dns-with-nodelocal-dnscache" >Overview of GKE DNS with NodeLocal DNSCache&lt;/a> for additional details.&lt;/em>&lt;/p>
+&lt;/blockquote>
+&lt;p>We wanted to look at some metrics from the &lt;code>node-local-dns&lt;/code> Pods but found that we didn&amp;rsquo;t have any! We fixed that but didn&amp;rsquo;t at the time learn anything new. &lt;em>See &lt;a class="link" href="#appendix-enabling-node-local-dns-metrics" >Enabling node-local-dns metrics&lt;/a> for how to fix/enable node-local-dns metrics.&lt;/em>&lt;/p>
+&lt;p>Stumbling over the logs of one of the &lt;code>node-local-dns-x&lt;/code> Pods I notice:&lt;/p>
+&lt;pre>&lt;code>[ERROR] plugin/errors: 2 archive.ubuntu.com.some-namespace.svc.cluster.local. A: dial tcp 172.18.165.130:53: i/o timeout
+&lt;/code>&lt;/pre>
+&lt;p>This tells us that at least lookups going to &lt;code>kube-dns&lt;/code> in the cluster (&lt;code>172.18.165.130:53&lt;/code>) are having problems.&lt;/p>
+&lt;p>So timeouts are happening on individual lookups, it&amp;rsquo;s not just the total duration of 7 lookups timing out. And lookups are not only happening inside the client application but in &lt;code>node-local-dns&lt;/code> as well. We still don&amp;rsquo;t know if these lookups are lost or merely slow. But seen from the application anything longer than 2 seconds, that is timing out on &lt;code>node-local-dns&lt;/code>, might as well be lost.&lt;/p>
+&lt;p>Just to be sure I checked that packets were not being dropped or lost on the nodes on both sides. And indeed the network seems fine. It&amp;rsquo;s been a long time since I&amp;rsquo;ve actually experienced problems due to packets being lost, but it&amp;rsquo;s always good to rule it out.&lt;/p>
+&lt;p>Next step is to capture the packets as they (hopefully) leave the &lt;code>node-local-dns&lt;/code> Pod and (maybe) arriving at one of the &lt;code>kube-dns&lt;/code> Pods.&lt;/p>
+&lt;p>&lt;em>See &lt;a class="link" href="#appendix-network-packet-capture" >Network packet capture without dependencies&lt;/a> for how to capture packets in Kubernetes.&lt;/em>&lt;/p>
+&lt;p>The packets are indeed arriving at the &lt;code>dnsmasq&lt;/code> container in the &lt;code>kube-dns&lt;/code> Pods:&lt;/p>
+&lt;pre>&lt;code>Query 0x31e8:
+Leaves node-local-dns eth0:
+10:53:11.134 10.0.0.107 172.20.13.4 DNS 0x31e8 Standard query 0x31e8 A archive.ubuntu.com.some-ns.svc.cluster.local
+Arrives at dnsmasq eth0:
+10:53:11.134 10.0.0.107 172.20.13.4 DNS 0x31e8 Standard query 0x31e8 A archive.ubuntu.com.some-ns.svc.cluster.local
+&lt;/code>&lt;/pre>
+&lt;p>Looking at DNS resolution time from the &lt;code>kube-dns&lt;/code> container which &lt;code>dnsmasq&lt;/code> forwards to shows that &lt;code>kube-dns&lt;/code> is consistently answering queries extremely fast (not shown here).&lt;/p>
+&lt;p>But after some head scratching I look at the time between queries arriving at &lt;code>dnsmasq&lt;/code> on &lt;code>eth0&lt;/code> before leaving again on &lt;code>lo&lt;/code> for &lt;code>kube-dns&lt;/code> and indeed there is a (relatively) long delay of 952ms between 10:53:11.134 and 10:53:12.086:&lt;/p>
+&lt;pre>&lt;code>Leaves dnsmasq lo:
+10:53:12.086 127.0.0.1 127.0.0.1 DNS 0x31e8 Standard query 0x31e8 A archive.ubuntu.com.some-ns.svc.cluster.local
+&lt;/code>&lt;/pre>
+&lt;p>In this case the query just sits around in &lt;code>dnsmasq&lt;/code> for almost one second before being forwarded to &lt;code>kube-dns&lt;/code>!&lt;/p>
+&lt;p>Why? As with most issues we start by checking if there are any issues with memory or CPU usage or CPU throttling (&lt;a class="link" href="#footnote-c" >Footnote C&lt;/a>).&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/kube-dns-resource-usage.png"
+width="1377"
+height="693"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/kube-dns-resource-usage_hu15148347036814534097.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/kube-dns-resource-usage_hu11608676099510034976.png 1024w"
+loading="lazy"
+alt="Graphs showing DNS response time on node-local-dns Pods and resource usage on kube-dns Pods."
+class="gallery-image"
+data-flex-grow="198"
+data-flex-basis="476px"
+>&lt;/p>
+&lt;p>Nope. CPU and memory usage is both low and stable but the 99 percentile DNS request duration is all over the place.&lt;/p>
+&lt;p>We also check and see that there is plenty of unused CPU available on the underlying nodes these pods are running on.&lt;/p>
+&lt;blockquote>
+&lt;p>We also used &lt;code>dnsperf&lt;/code> to benchmark and stress-test the various components and while fun, didn&amp;rsquo;t teach us anything new. &lt;em>See &lt;a class="link" href="#appendix-using-dnsperf" >Using dnsperf to test DNS performance&lt;/a> for more information on that particular side-quest.&lt;/em>&lt;/p>
+&lt;/blockquote>
+&lt;p>Next up I want to increase the logging verbosity of &lt;code>dnsmasq&lt;/code> to see if there are any clues to why it was (apparently) delaying processing DNS requests.&lt;/p>
+&lt;p>&lt;em>Have a look at &lt;a class="link" href="#appendix-verbose-logging-on-kube-dns" >Verbose logging on kube-dns&lt;/a> for how to increase logging and &lt;a class="link" href="#appendix-analyzing-dnsmasq-logs" >Analyzing dnsmasq logs&lt;/a> for how I analyzed the logs.&lt;/em>&lt;/p>
+&lt;p>Analyzing the logs we learn that at least it appears that individual requests are fast and not clogging up the machinery.&lt;/p>
+&lt;p>In the meantime Google Cloud Support came back to us asking if we could run a command &lt;code>for i in $(seq 1 1800) ; do echo &amp;quot;$(date) Try: ${i} DnsmasqProcess: $(pidof dnsmasq | wc -w)&amp;quot;; sleep 1; done&lt;/code> on the VM of the Pod. It also works to run this in a debug container attached to the &lt;code>dnsmasq&lt;/code> container. The output looks like:&lt;/p>
+&lt;pre>&lt;code>Wed Oct 11 14:50:57 UTC 2023 Try: 1 DnsmasqProcess: 9
+Wed Oct 11 14:50:58 UTC 2023 Try: 2 DnsmasqProcess: 14
+Wed Oct 11 14:50:59 UTC 2023 Try: 3 DnsmasqProcess: 15
+Wed Oct 11 14:51:00 UTC 2023 Try: 4 DnsmasqProcess: 21
+Wed Oct 11 14:51:01 UTC 2023 Try: 5 DnsmasqProcess: 21
+&lt;/code>&lt;/pre>
+&lt;p>It turns out that &lt;code>dnsmasq&lt;/code> has a &lt;a class="link" href="https://github.com/imp/dnsmasq/blob/master/src/config.h#L18" target="_blank" rel="noopener"
+>hard coded limit of 20 child processes&lt;/a>. So every time we see 21 it means it will not spawn a new child to process incoming connections.&lt;/p>
+&lt;p>I plotted this on the same graph as the DNS request times observed from raw packet captures (See &lt;a class="link" href="#analyzing-dns-problems-based-on-packet-capture" >Analyzing DNS problems based on packet captures&lt;/a>):&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-and-dns-packet-latency.png"
+width="1428"
+height="489"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-and-dns-packet-latency_hu3974894387970546800.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-and-dns-packet-latency_hu12671590469830325247.png 1024w"
+loading="lazy"
+alt="Graph showing DNS resolution time from packet captures in blue. Number of dnsmasq processes in orange."
+class="gallery-image"
+data-flex-grow="292"
+data-flex-basis="700px"
+>&lt;/p>
+&lt;p>Graphing the number of &lt;code>dnsmasq&lt;/code> processes and observed DNS request latency finally shows a stable correlation between our symptoms and a potential cause.&lt;/p>
+&lt;p>You can also get a crude estimation by graphing the &lt;code>container_processes{namespace=&amp;quot;kube-system&amp;quot;, container=&amp;quot;dnsmasq&amp;quot;}&lt;/code> metric, or use my &lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/grafana-dashboard-kube-dns.json" target="_blank" rel="noopener"
+>kube-dns Grafana dashboard&lt;/a> if you have cAdvisor/container metrics enabled:&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-graph-and-node-local-dns-duration.png"
+width="1631"
+height="646"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-graph-and-node-local-dns-duration_hu5189994088160500401.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-graph-and-node-local-dns-duration_hu2637781448338722321.png 1024w"
+loading="lazy"
+alt="Graph showing DNS resolution time from node-local-dns and dnsmasq processes."
+class="gallery-image"
+data-flex-grow="252"
+data-flex-basis="605px"
+>&lt;/p>
+&lt;p>Going back to our packet captures I see connections that are unused for many seconds before finally being closed by &lt;code>node-local-dns&lt;/code>.&lt;/p>
+&lt;pre>&lt;code>08:06:07.849 172.20.9.11 10.0.0.29 53 → 46123 [ACK] Seq=1 Ack=80 Win=43648 Len=0
+08:06:09.849 10.0.0.29 172.20.9.11 46123 → 53 [FIN, ACK] Seq=80 Ack=1 Win=42624 Len=0
+08:06:09.890 172.20.9.11 10.0.0.29 53 → 46123 [ACK] Seq=1 Ack=81 Win=43648 Len=0
+&lt;/code>&lt;/pre>
+&lt;p>However &lt;code>dnsmasq&lt;/code> only acknowledges the request to close the connection, it does not actually close it yet. In order for the connection to be properly closed both sides have to &lt;code>FIN, ACK&lt;/code>.&lt;/p>
+&lt;p>Many seconds later &lt;code>dnsmasq&lt;/code> faithfully tries to return a response and finish the closing of the connection, but &lt;code>node-local-dns&lt;/code> (CoreDNS) has promptly forgotten about the whole thing and replies with the TCP equivalent of a shrug (&lt;code>RST&lt;/code>):&lt;/p>
+&lt;pre>&lt;code>08:06:15.836 172.20.9.11 10.0.0.29 53 46123 Standard query response 0x7f12 No such name A storage.googleapis.com.some-ns.svc.cluster.local SOA ns.dns.cluster.local
+08:06:15.836 172.20.9.11 10.0.0.29 53 46123 53 → 46123 [FIN, ACK] Seq=162 Ack=81 Win=43648 Len=0
+08:06:15.836 10.0.0.29 172.20.9.11 46123 53 46123 → 53 [RST] Seq=81 Win=0 Len=0
+&lt;/code>&lt;/pre>
+&lt;p>Then I analyzed the whole packet capture to find the number of open connections at any time as well as the frequency and duration of these lingering TCP connections. &lt;em>See &lt;a class="link" href="#appendix-analyzing-concurrent-tcp-connections" >Analyzing concurrent TCP connections&lt;/a> for details on how.&lt;/em>&lt;/p>
+&lt;p>What we find is that the number of open connections at times surge way past 20 and that coincides with increased latency. In addition unused connections stay open for a problematic long time (5-10 seconds).&lt;/p>
+&lt;p>Since the closing of connections is initiated by CoreDNS. Is there any way we can make CoreDNS close connections faster or limit the number of connections it uses?&lt;/p>
+&lt;p>NodeLocal DNSCache (in GKE at least) is configured (&lt;code>kubectl get configmap --namespace kube-system node-local-dns -o yaml | yq .data.Corefile&lt;/code>) with:&lt;/p>
+&lt;pre>&lt;code>cluster.local:53 {
+forward . __PILLAR__CLUSTER__DNS__ {
+force_tcp
+expire 1s
+&lt;/code>&lt;/pre>
+&lt;p>So it is actually configured to &amp;ldquo;expire&amp;rdquo; connections after 1 second.&lt;/p>
+&lt;p>I&amp;rsquo;m not well versed in the CoreDNS codebase but it seems expiring connections is &lt;a class="link" href="https://github.com/coredns/coredns/blob/master/plugin/pkg/proxy/persistent.go#L48" target="_blank" rel="noopener"
+>handled by a ticker&lt;/a>. A ticker in go sends a signal every &amp;ldquo;tick&amp;rdquo; that can be used to trigger events for example. This means connections aren&amp;rsquo;t closed once they pass the 1 second mark, but the cleanup process runs every 1 second and then purges expired connections. So a connection can be idle for almost 2x the time (2 seconds in our case) before being cleaned up.&lt;/p>
+&lt;p>I still can&amp;rsquo;t explain why we see connections lingering on for 5-10 seconds though.&lt;/p>
+&lt;p>There are no configuration options indicating that it&amp;rsquo;s possible to limit the number of connections. Nor anything in the code that would suggest it&amp;rsquo;s a possibility. Adding it is probably not done in a day either as it would require making decisions on trade-offs about how to handle excess traffic volume. How much to queue, for how long. How to avoid the queue eating too much memory. What to do when the queue is full and so on and so on.&lt;/p>
+&lt;p>At this point I feel we have a pretty good grasp of how all of this conspires to cause the problems we observe. But unfortunately I can&amp;rsquo;t see any permanent solution that does not require modifying CoreDNS and ideally &lt;code>dnsmasq&lt;/code> code itself. At the moment we don&amp;rsquo;t have the capacity to create and push through such changes upstream. If I could snap my fingers and magically get some new features they would be:&lt;/p>
+&lt;ul>
+&lt;li>
+&lt;p>dnsmasq&lt;/p>
+&lt;ul>
+&lt;li>Make &lt;code>MAX_PROCS&lt;/code> configurable.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>
+&lt;p>CoreDNS&lt;/p>
+&lt;ul>
+&lt;li>Configurable max TCP connection pool size. Metrics on pool size and usage.&lt;/li>
+&lt;li>Configurable queue size for requests waiting for a new connection from the pool. Metrics on queue capacity (max) and current size for tuning.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;p>But until that becomes a reality I think the best option is to avoid using NodeLocal DNSCache in combination with &lt;code>kube-dns&lt;/code>, and instead replace &lt;code>kube-dns&lt;/code> with Cloud DNS.&lt;/p>
+&lt;p>&lt;a id="appendices">&lt;/a>&lt;/p>
+&lt;h1 id="appendices">Appendices
+&lt;/h1>&lt;p>&lt;a id="appendix-enabling-additional-envoy-metrics">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---enabling-additional-envoy-metrics">Appendix - Enabling additional envoy metrics
+&lt;/h2>&lt;p>&lt;em>See &lt;a class="link" href="https://istio.io/latest/docs/concepts/observability/#proxy-level-metrics" target="_blank" rel="noopener"
+>istio.io&lt;/a> for some high level info on proxy-level metrics and &lt;a class="link" href="https://www.envoyproxy.io/docs/envoy/latest/configuration/upstream/cluster_manager/cluster_stats" target="_blank" rel="noopener"
+>envoyproxy.io&lt;/a> for complete list of available metrics.&lt;/em>&lt;/p>
+&lt;p>Most likely we are interested in the &lt;code>upstream_cx_*&lt;/code> and &lt;code>upstream_rq_*&lt;/code> metrics.&lt;/p>
+&lt;p>By default metrics are only gathered and exposed for the &lt;code>xds-grpc&lt;/code> cluster, and the full stats name looks like &lt;code>cluster.xds-grpc.upstream_cx_total&lt;/code>. The &lt;code>xds-grpc&lt;/code> cluster I assume is metrics for traffic between the &lt;code>istio-proxy&lt;/code> containers in each Pod and the central istio services (&lt;code>istiod&lt;/code>) used for configuration management.&lt;/p>
+&lt;blockquote>
+&lt;p>A cluster in envoy is a grouping of backends and endpoints. Typically each Kubernetes &lt;code>Service&lt;/code> will be it’s own cluster. There are also separate clusters named &lt;code>BlackHoleCluster&lt;/code>, &lt;code>InboundPassthroughClusterIpv4&lt;/code> and &lt;code>PassthroughCluster&lt;/code>.&lt;/p>
+&lt;/blockquote>
+&lt;p>When enabling metrics for other services (or clusters as they&amp;rsquo;re also called) they look like&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>cluster.outbound|80||my-service.my-namespace.svc.cluster.local.upstream_cx_total&lt;/code> for outgoing traffic and&lt;/li>
+&lt;li>&lt;code>cluster.inbound|8080||.upstream_cx_total&lt;/code> for incoming traffic.&lt;/li>
+&lt;/ul>
+&lt;blockquote>
+&lt;p>Beware that traffic to for example api.signicat.com/some-service will be mapped to the internal Kubernetes Service DNS name in the metric, like some-service.some-team.svc.cluster.local.&lt;/p>
+&lt;p>Ports are also mapped. For outgoing traffic it will be the port in the Service. While for incoming traffic it will be the port the Pod is actually listening on, and not the one mapped in the Service.&lt;/p>
+&lt;/blockquote>
+&lt;h3 id="enabling-additional-envoy-metrics">Enabling additional envoy metrics
+&lt;/h3>&lt;p>istio.io documents &lt;a class="link" href="https://istio.io/latest/docs/ops/configuration/telemetry/envoy-stats/" target="_blank" rel="noopener"
+>how to enable additional envoy metrics&lt;/a> both globally in the mesh by configuring the &lt;code>IstioOperator&lt;/code> object as well as on a per Deployment/Pod using the &lt;code>proxy.istio.io/config&lt;/code> annotation.&lt;/p>
+&lt;blockquote>
+&lt;p>&lt;strong>WARNING: Be very careful when enabling additional metrics as they have a tendency to expose orders of magnitude more time-series than you might expect.&lt;/strong>&lt;/p>
+&lt;p>I apparently managed to get Prometheus OOMKilled even with my fairly limited testing on two deployments.&lt;/p>
+&lt;p>If you happen to have &lt;a class="link" href="https://victoriametrics.com/" target="_blank" rel="noopener"
+>VictoriaMetrics&lt;/a> in your monitoring stack you can monitor cardinality (the number of unique time-series, which is the thing that usually breaks a time-series database) in the VM UI:&lt;/p>
+&lt;div class="highlight">&lt;div class="chroma">
+&lt;table class="lntable">&lt;tr>&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code>&lt;span class="lnt">1
+&lt;/span>&lt;/code>&lt;/pre>&lt;/td>
+&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code class="language-fallback" data-lang="fallback">&lt;span class="line">&lt;span class="cl">kubectl -n metrics port-forward services/victoria-metrics-cluster-vmselect 8481:8481
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/td>&lt;/tr>&lt;/table>
+&lt;/div>
+&lt;/div>&lt;p>And going to http://localhost:8481/select/0/vmui/?#/cardinality&lt;/p>
+&lt;/blockquote>
+&lt;h3 id="enable-additional-metrics-on-a-deployment-or-pod">Enable additional metrics on a Deployment or Pod
+&lt;/h3>&lt;p>To enable additional metrics on a Deployment or Pod, add the following annotations:&lt;/p>
+&lt;div class="highlight">&lt;div class="chroma">
+&lt;table class="lntable">&lt;tr>&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code>&lt;span class="lnt"> 1
+&lt;/span>&lt;span class="lnt"> 2
+&lt;/span>&lt;span class="lnt"> 3
+&lt;/span>&lt;span class="lnt"> 4
+&lt;/span>&lt;span class="lnt"> 5
+&lt;/span>&lt;span class="lnt"> 6
+&lt;/span>&lt;span class="lnt"> 7
+&lt;/span>&lt;span class="lnt"> 8
+&lt;/span>&lt;span class="lnt"> 9
+&lt;/span>&lt;span class="lnt">10
+&lt;/span>&lt;/code>&lt;/pre>&lt;/td>
+&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code class="language-yaml" data-lang="yaml">&lt;span class="line">&lt;span class="cl">&lt;span class="nt">metadata&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>&lt;span class="nt">annotations&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>&lt;span class="nt">proxy.istio.io/config&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w"> &lt;/span>&lt;span class="p">|-&lt;/span>&lt;span class="sd">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="sd"> proxyStatsMatcher:
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="sd"> inclusionSuffixes:
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="sd"> - &amp;#34;upstream_rq_timeout&amp;#34;
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="sd"> - &amp;#34;upstream_rq_retry&amp;#34;
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="sd"> - &amp;#34;upstream_rq_retry_limit_exceeded&amp;#34;
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="sd"> - &amp;#34;upstream_rq_retry_success&amp;#34;
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="sd"> - &amp;#34;upstream_rq_retry_overflow&amp;#34;&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/td>&lt;/tr>&lt;/table>
+&lt;/div>
+&lt;/div>&lt;p>Remember to add this to the &lt;strong>Pod&lt;/strong> metadata (&lt;code>spec.template.metadata&lt;/code>) if adding to a Deployment.&lt;/p>
+&lt;blockquote>
+&lt;p>This results in a new time-series being exposed for each Service and Port (Cluster) that envoy has configured.&lt;/p>
+&lt;p>In our case we have ~500 services in our dev cluster and enabling these specific metrics adds ~3.800 new time-series for &lt;em>each Pod&lt;/em> in the Deployment we added it to. The test Deployment I&amp;rsquo;m playing with has 6 Pods so ~23.000 new time-series from adding 5 additional metrics to 1 Deployment!&lt;/p>
+&lt;/blockquote>
+&lt;p>Another option is to use regex to enable additional metrics:&lt;/p>
+&lt;div class="highlight">&lt;div class="chroma">
+&lt;table class="lntable">&lt;tr>&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code>&lt;span class="lnt">1
+&lt;/span>&lt;span class="lnt">2
+&lt;/span>&lt;span class="lnt">3
+&lt;/span>&lt;/code>&lt;/pre>&lt;/td>
+&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code class="language-yaml" data-lang="yaml">&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>&lt;span class="nt">inclusionRegexps&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>- &lt;span class="s2">&amp;#34;.*upstream_rq_.*&amp;#34;&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>- &lt;span class="s2">&amp;#34;.*upstream_cx_.*&amp;#34;&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/td>&lt;/tr>&lt;/table>
+&lt;/div>
+&lt;/div>&lt;p>But again, enabling these ~50 metrics on this specific Deployment will result in ~250.000 new time-series.&lt;/p>
+&lt;blockquote>
+&lt;p>Be especially wary of metrics envoy exposes as histograms, such as &lt;code>upstream_cx_connect_ms&lt;/code> and &lt;code>upstream_cx_length_ms&lt;/code> as they result in many _bucket time-series. During my testing this resulted in 6-7 million new time-series in total.&lt;/p>
+&lt;/blockquote>
+&lt;p>It&amp;rsquo;s possible to specify only the connections we are interested in, which makes it manageable, cardinality wise. For example to only gather metrics from Services A through F in their corresponding namespaces:&lt;/p>
+&lt;div class="highlight">&lt;div class="chroma">
+&lt;table class="lntable">&lt;tr>&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code>&lt;span class="lnt">1
+&lt;/span>&lt;span class="lnt">2
+&lt;/span>&lt;span class="lnt">3
+&lt;/span>&lt;/code>&lt;/pre>&lt;/td>
+&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code class="language-yaml" data-lang="yaml">&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>&lt;span class="nt">inclusionRegexps&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>- &lt;span class="s2">&amp;#34;.*(svc-a.ns-a.svc|svc-b.ns-b.svc|svc-c.ns-c.svc|svc-d.ns-d.svc|svc-e.ns-e.svc|svc-f.ns-f.svc).*.upstream_rq.*&amp;#34;&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>- &lt;span class="s2">&amp;#34;.*(svc-a.ns-a.svc|svc-b.ns-b.svc|svc-c.ns-c.svc|svc-d.ns-d.svc|svc-e.ns-e.svc|svc-f.ns-f.svc).*.upstream_cx.*&amp;#34;&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/td>&lt;/tr>&lt;/table>
+&lt;/div>
+&lt;/div>&lt;h3 id="enable-additional-metrics-globally-please-dont">Enable additional metrics globally (please don’t!)
+&lt;/h3>&lt;p>You can also enable additional metrics globally across the mesh. But that&amp;rsquo;s probably a very bad idea if you are running at any sort of scale. I estimated that enabling &lt;code>.*upstream_rq_.*&lt;/code> and &lt;code>.*upstream_cx_.*&lt;/code> in our dev cluster would result in 50M additional time-series at a minimum. Or 5-10x our current Prometheus usage.&lt;/p>
+&lt;p>If you are using the old &lt;a class="link" href="https://istio.io/latest/docs/setup/install/operator/" target="_blank" rel="noopener"
+>Istio Operator&lt;/a> way of installing and managing istio it should be enough to update the &lt;code>IstioOperator&lt;/code> object in the cluster. If you are using &lt;code>istioctl&lt;/code> (&lt;a class="link" href="https://istio.io/latest/about/faq/#install-method-selection" target="_blank" rel="noopener"
+>recommended&lt;/a>) you must update the source &lt;code>IstioOperator&lt;/code> manifest that is being fed to &lt;code>istioctl&lt;/code> and run the appropriate &lt;code>istioctl&lt;/code> commands again to update. Note that this also creates an &lt;code>IstioOperator&lt;/code> object in the cluster with whatever config is used. But in this case it&amp;rsquo;s never used for anything other than reference. So updating the &lt;code>IstioOperator&lt;/code> object in a cluster if managing istio with &lt;code>istioctl&lt;/code> does nothing.&lt;/p>
+&lt;h3 id="viewing-stats-and-metrics">Viewing stats and metrics
+&lt;/h3>&lt;p>Metrics should start becoming available in Prometheus with names like &lt;code>envoy_cluster_upstream_cx_total&lt;/code>. Note that by default you&amp;rsquo;ll already see metrics from the &lt;code>xds-grpc&lt;/code> cluster.&lt;/p>
+&lt;p>You can also get the &lt;a class="link" href="https://istio.io/latest/docs/ops/configuration/telemetry/envoy-stats/" target="_blank" rel="noopener"
+>stats directly from a sidecar&lt;/a>. Either by querying the &lt;code>pilot-agent&lt;/code> directly:&lt;/p>
+&lt;pre>&lt;code>kubectl exec -n my-namespace my-pod -c istio-proxy -- pilot-agent request GET stats
+&lt;/code>&lt;/pre>
+&lt;p>Or querying the metrics endpoint exposed to Prometheus:&lt;/p>
+&lt;pre>&lt;code>kubectl exec -n my-namespace my-pod -c istio-proxy -- curl -sS 'localhost:15000/stats/prometheus'
+&lt;/code>&lt;/pre>
+&lt;p>Note that these will not give you any additional metrics compared to those exposed to Prometheus. A metric that is not enabled will not show up, and all metrics that are enabled are also automatically exposed to Prometheus.&lt;/p>
+&lt;h3 id="notes-on-timeout-and-retry-metrics">Notes on timeout and retry metrics
+&lt;/h3>&lt;p>If istio is configured to be involved with timeouts and retries that is configured on the &lt;a class="link" href="https://istio.io/latest/docs/reference/config/networking/virtual-service/#Destination" target="_blank" rel="noopener"
+>VirtualService&lt;/a> level.&lt;/p>
+&lt;p>That means it will only take effect if using &lt;code>api.signicat.com/some-service&lt;/code> (a route in a Istio &lt;code>VirtualService&lt;/code>) and not &lt;code>some-service.some-namespace.svc.cluster.local&lt;/code> (Kubernetes &lt;code>Service&lt;/code>).&lt;/p>
+&lt;p>Istio will only count timeouts and retries for requests to a &lt;code>VirtualService&lt;/code> route that has timeouts (and optionally retries) configured.&lt;/p>
+&lt;p>Additionally, the timeouts and retries seems to be enforced, and counted, in the Source istio-proxy (envoy), and not the Target.&lt;/p>
+&lt;h3 id="further-work">Further work
+&lt;/h3>&lt;p>It would be beneficial to be able to have envoy only show/export metrics that are non-zero. Since there is usually only a very small set of all possible Service-to-Service pairs that will actually regularly have traffic.&lt;/p>
+&lt;p>It’s possible to customize metrics using the Telemetry API (&lt;a class="link" href="https://istio.io/latest/docs/tasks/observability/metrics/telemetry-api/" target="_blank" rel="noopener"
+>Customizing Istio Metrics with Telemetry API&lt;/a>) but it seems limited to only working with metrics and their dimensions. Not the time-series values.&lt;/p>
+&lt;p>&lt;a class="link" href="https://istio.io/latest/docs/reference/config/proxy_extensions/wasm-plugin/" target="_blank" rel="noopener"
+>WASM plugins&lt;/a> are probably not a good fit either and are experimental and causes a severe CPU and memory penalty.&lt;/p>
+&lt;blockquote>
+&lt;p>&lt;strong>Edit to add in 2024&lt;/strong>&lt;/p>
+&lt;p>We know today that the reason for so many time-series (reporting zero), as well as elevated memory usage in &lt;code>istio-proxy&lt;/code>, is because we did not filter exposed Services between namespaces causing every &lt;code>istio-proxy&lt;/code> to keep track of every pair of possible workloads in the whole cluster.&lt;/p>
+&lt;/blockquote>
+&lt;p>&lt;a id="appendix-overview-of-dns-on-gke">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---overview-of-dns-on-gke">Appendix - Overview of DNS on GKE
+&lt;/h2>&lt;blockquote>
+&lt;p>&lt;strong>kube-dns and CoreDNS confusion&lt;/strong>&lt;/p>
+&lt;p>The main difference between DNS on upstream Kubernetes and GKE is that Kubernetes &lt;a class="link" href="https://kubernetes.io/blog/2018/07/10/coredns-ga-for-kubernetes-cluster-dns/" target="_blank" rel="noopener"
+>switched to&lt;/a> CoreDNS 5 years ago while GKE &lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/kube-dns" target="_blank" rel="noopener"
+>still uses&lt;/a> the old &lt;code>kube-dns&lt;/code>. It’s &lt;a class="link" href="https://cloud.google.com/knowledge/kb/how-to-run-coredns-on-kubernetes-engine-000004698" target="_blank" rel="noopener"
+>possible to add CoreDNS but it’s not possible to remove or disable&lt;/a> &lt;code>kube-dns&lt;/code>.&lt;/p>
+&lt;p>In upstream K8s, &lt;a class="link" href="https://kubernetes.io/blog/2018/07/10/coredns-ga-for-kubernetes-cluster-dns/" target="_blank" rel="noopener"
+>CoreDNS reached GA back in 2018 in K8s 1.11&lt;/a> and &lt;code>kube-dns&lt;/code> was &lt;a class="link" href="https://kubernetes.io/docs/tasks/administer-cluster/coredns/#migrating-to-coredns" target="_blank" rel="noopener"
+>removed from kubeadm in K8s 1.21&lt;/a>.&lt;/p>
+&lt;p>However for &lt;a class="link" href="https://github.com/coredns/deployment/issues/116" target="_blank" rel="noopener"
+>backwards compatibility&lt;/a> CoreDNS &lt;a class="link" href="https://github.com/coredns/deployment/blob/master/kubernetes/coredns.yaml.sed" target="_blank" rel="noopener"
+>still uses&lt;/a> the name &lt;code>kube-dns&lt;/code>, which makes things confusing for sure!&lt;/p>
+&lt;/blockquote>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/DNS-on-GKE.png"
+width="1313"
+height="586"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/DNS-on-GKE_hu2575099721844054612.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/DNS-on-GKE_hu15301862917548489956.png 1024w"
+loading="lazy"
+alt="Diagram showing DNS on GKE"
+class="gallery-image"
+data-flex-grow="224"
+data-flex-basis="537px"
+>&lt;/p>
+&lt;p>Part of the magic of Kubernetes is it&amp;rsquo;s DNS-based Service Discovery. Lets say we deploy an application that has a &lt;code>Service&lt;/code> named &lt;code>helloworld&lt;/code> to the namespace &lt;code>team-a&lt;/code>. Other applications in the same namespace are able to connect to that service by calling for example &lt;code>http://helloworld&lt;/code>. This makes it easy to build and configure a group of microservices that talk to each other without needing to know about namespaces or FQDNs. Applications in another namespace can also call that application using &lt;code>http://helloworld.team-a&lt;/code>. (&lt;a class="link" href="#footnote-d" >Footnote D&lt;/a>).&lt;/p>
+&lt;p>This magic is achieved using the standard DNS &lt;code>search&lt;/code> domain list feature. On Linux the &lt;code>/etc/resolv.conf&lt;/code> &lt;a class="link" href="https://man7.org/linux/man-pages/man5/resolv.conf.5.html" target="_blank" rel="noopener"
+>file&lt;/a> defines which DNS servers to use. It also includes a &lt;code>search&lt;/code> option that works together with the &lt;code>ndots&lt;/code> option. You can see this by executing &lt;code>cat /etc/resolv.conf&lt;/code> in any &lt;code>Pod&lt;/code>.&lt;/p>
+&lt;p>If a domain name contains fewer &amp;ldquo;dots&amp;rdquo; (&amp;quot;.&amp;quot;) than &lt;code>ndots&lt;/code> is set to, the DNS resolver will first try the hostname with each of the appended domains in &lt;code>search&lt;/code>. In Kubernetes (and GKE) ndots is by default set to 5.&lt;/p>
+&lt;p>In vanilla Kubernetes the search domains are&lt;code> &amp;lt;namespace&amp;gt;.svc.cluster.local svc.cluster.local cluster.local&lt;/code> while on GKE it&amp;rsquo;s &lt;code>&amp;lt;namespace&amp;gt;.svc.cluster.local svc.cluster.local cluster.local &amp;lt;gcp-zone&amp;gt;.c.technology-dev-platform.internal c.&amp;lt;gcp-project&amp;gt;.internal google.internal&lt;/code>.&lt;/p>
+&lt;p>This means if we call &lt;code>https://api.signicat.com&lt;/code> (2 dots) it will first try to resolve &lt;code>api.signicat.com.some-namespace.svc.cluster.local&lt;/code> and so on through the whole list, sequentally, before finally trying &lt;code>api.signicat.com&lt;/code> and actually succeeding.&lt;/p>
+&lt;p>&lt;em>See &lt;a class="link" href="#appendix-reducing-dns-lookups" >Reducing DNS lookups in Kubernetes and GKE&lt;/a> for thoughts on avoiding some of this.&lt;/em>&lt;/p>
+&lt;p>Then the requests are sent to the &lt;code>dnsmasq&lt;/code> container of a &lt;code>kube-dns&lt;/code> Pod. &lt;code>dnsmasq&lt;/code> is configured by a combination of command-line arguments defined in the &lt;code>kube-dns&lt;/code> Deployment and data from the &lt;code>kube-dns&lt;/code> &lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/kube-dns" target="_blank" rel="noopener"
+>ConfigMap&lt;/a>. We have not changed the default &lt;code>kube-dns&lt;/code> ConfigMap and this results in &lt;code>dnsmasq&lt;/code> running with these arguments:&lt;/p>
+&lt;pre>&lt;code>/usr/sbin/dnsmasq -k \
+--cache-size=1000 \
+--no-negcache \
+--dns-forward-max=1500 \
+--log-facility=- \
+--server=/cluster.local/127.0.0.1#10053 \
+--server=/in-addr.arpa/127.0.0.1#10053 \
+--server=/ip6.arpa/127.0.0.1#10053 \
+--max-ttl=30 \
+--max-cache-ttl=30 \
+--server /internal/169.254.169.254 \
+--server 8.8.8.8 \
+--server 8.8.4.4 \
+--no-resolv
+&lt;/code>&lt;/pre>
+&lt;p>This means all lookups for &lt;code>cluster.local&lt;/code>, &lt;code>in-addr.arpa&lt;/code> and &lt;code>ip6.arpa&lt;/code> will be sent to &lt;code>127.0.0.1:10053&lt;/code>, which is the &lt;code>kube-dns&lt;/code> container. Lookups for &lt;code>internal&lt;/code> are sent to &lt;code>169.254.169.254&lt;/code>. All others are sent to &lt;code>8.8.8.8&lt;/code> and &lt;code>8.8.4.4&lt;/code>.&lt;/p>
+&lt;p>In addition &lt;code>--no-negcache&lt;/code> disables caching for lookups that were not found (&lt;code>NXDOMAIN&lt;/code>). This is particularly interesting since that means when looking up for example &lt;code>api.signicat.com&lt;/code> and the domains in the &lt;code>search&lt;/code> list are first tried, they will all result in &lt;code>NXDOMAIN&lt;/code> but &lt;code>dnsmasq&lt;/code> will not cache those results but send them on to &lt;code>kube-dns&lt;/code>. &lt;em>Every&lt;/em>. &lt;em>Time&lt;/em>. This may severely reduce the usefulness of the cache and create a constant volume of traffic to &lt;code>kube-dns&lt;/code> itself.&lt;/p>
+&lt;blockquote>
+&lt;p>It&amp;rsquo;s also worth noting that Google Public DNS servers have a &lt;a class="link" href="https://developers.google.com/speed/public-dns/docs/isp" target="_blank" rel="noopener"
+>default rate limit of 1500 QPS per IP&lt;/a>.&lt;/p>
+&lt;/blockquote>
+&lt;p>&lt;a id="appendix-reducing-dns-lookups">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---reducing-dns-lookups-in-kubernetes-and-gke">Appendix - Reducing DNS lookups in Kubernetes and GKE
+&lt;/h2>&lt;p>There are two reasons for the 7 DNS lookups instead of the ideal 1. First is the &lt;code>ndots&lt;/code> which tells the DNS resolver in the container if a domain name has fewer dots than this, it will first try looking up the name by appending each entry in the &lt;code>search&lt;/code> list sequentially. For Kubernetes &lt;code>ndots&lt;/code> is set to 5 (why is &lt;a class="link" href="https://github.com/kubernetes/kubernetes/issues/33554#issuecomment-266251056" target="_blank" rel="noopener"
+>explained by Tim Hockin here&lt;/a>). So &lt;code>api.signicat.com&lt;/code> only has 2 dots, and hence will first go through the list of search domains.&lt;/p>
+&lt;p>Secondly GKE adds 3 extra search domains in addition to the 3 standard ones in Kubernetes. Bringing the total to 6 before doing the &amp;ldquo;proper&amp;rdquo; DNS lookup.&lt;/p>
+&lt;p>The specific assumption we are deviating from leading to problems in our case is &amp;ldquo;We could mitigate some of the perf penalties by always trying names as upstream FQDNs first, but that means that all intra-cluster lookups get slower. Which do we expect more frequently? I&amp;rsquo;ll argue intra-cluster names, if only because the TTL is so low.&amp;rdquo;&lt;/p>
+&lt;p>An option that we’re currently exploring is using a trailing dot in the FQDN (&lt;code>api.signicat.com.&lt;/code>) when calling other services. This explicitly tells DNS that this is a FQDN and should not search through the search domain lists for a hit first. This seems to work on some of our services but not all. Indicating that there isn’t any inherent problems doing this with regards to istio or other infrastructure. But there may be additional changes needed on some services to support this. I’m suspecting certain web application frameworks in certain languages not handling this well out of the box.&lt;/p>
+&lt;p>&lt;a id="appendix-overview-of-gke-dns-with-nodelocal-dnscache">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---overview-of-gke-dns-with-nodelocal-dnscache">Appendix - Overview of GKE DNS with NodeLocal DNSCache
+&lt;/h2>&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/DNS-on-GKE-with-Node-Local-DNS-Cache.png"
+width="1201"
+height="855"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/DNS-on-GKE-with-Node-Local-DNS-Cache_hu15358002095465690191.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/DNS-on-GKE-with-Node-Local-DNS-Cache_hu7906030369844017798.png 1024w"
+loading="lazy"
+alt="Diagram showing DNS on GKE with NodeLocal DNSCache enabled"
+class="gallery-image"
+data-flex-grow="140"
+data-flex-basis="337px"
+>&lt;/p>
+&lt;p>&lt;a class="link" href="https://kubernetes.io/docs/tasks/administer-cluster/nodelocaldns/" target="_blank" rel="noopener"
+>NodeLocal DNSCache&lt;/a> is a feature of Kubernetes that primarily aims to improve performance, scale and latency by:&lt;/p>
+&lt;ul>
+&lt;li>Potentially not traversing the network to another node&lt;/li>
+&lt;li>Skip iptables DNAT which sometimes caused problems&lt;/li>
+&lt;li>Upgrading connections from UDP to TCP which should reduce latency in case of dropped packets&lt;/li>
+&lt;li>Enabling negative caching&lt;/li>
+&lt;/ul>
+&lt;p>NodeLocal DNSCache is &lt;a class="link" href="https://cloud.google.com/kubernetes-engine/docs/how-to/nodelocal-dns-cache" target="_blank" rel="noopener"
+>available as a GKE add-on&lt;/a>.&lt;/p>
+&lt;p>NodeLocal DNSCache is deployed as a &lt;code>DaemonSet&lt;/code> named &lt;code>node-local-dns&lt;/code> in &lt;code>kube-system&lt;/code> namespace. One &lt;code>node-local-dns-x&lt;/code> Pod is created on each node in the cluster.&lt;/p>
+&lt;p>The &lt;code>node-local-dns-x&lt;/code> Pods run CoreDNS and are configured by the &lt;code>node-local-dns&lt;/code> ConfigMap (&lt;code>kubectl get cm node-local-dns -o yaml|yq .data.Corefile&lt;/code>).&lt;/p>
+&lt;p>The configuration is similar to &lt;code>dnsmasq&lt;/code> in that requests for &lt;code>cluster.local&lt;/code>, &lt;code>in-addr.arpa&lt;/code> and &lt;code>ip6.arpa&lt;/code> are sent to &lt;code>kube-dns&lt;/code> while the rest are sent to &lt;code>8.8.8.8&lt;/code> and &lt;code>8.8.4.4&lt;/code>.&lt;/p>
+&lt;p>It binds to (re-uses) the same IP as the &lt;code>kube-dns&lt;/code> Service. That way all requests from Pods on the node towards &lt;code>kube-dns&lt;/code> will actually be handled by &lt;code>node-local-dns&lt;/code> instead. And to actually communicate with &lt;code>kube-dns&lt;/code> another Service named &lt;code>kube-dns-upstream&lt;/code> is created that is a clone of the &lt;code>kube-dns&lt;/code> Service but with a different IP.&lt;/p>
+&lt;p>Even though &lt;code>node-local-dns&lt;/code> uses CoreDNS and &lt;a class="link" href="https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack" target="_blank" rel="noopener"
+>kube-prometheus-stack&lt;/a> has support for scraping CoreDNS it won&amp;rsquo;t necessarily work for &lt;code>node-local-dns&lt;/code>. See the next appendix for how to scrape metrics from &lt;code>node-local-dns&lt;/code>.&lt;/p>
+&lt;p>&lt;a id="appendix-enabling-node-local-dns-metrics">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---enabling-node-local-dns-metrics">Appendix - Enabling node-local-dns metrics
+&lt;/h2>&lt;p>We wanted to look at some metrics from node-local-dns, but found that we didn&amp;rsquo;t have any!&lt;/p>
+&lt;p>The &lt;code>node-local-dns&lt;/code> pods do have annotations for scraping metrics:&lt;/p>
+&lt;div class="highlight">&lt;div class="chroma">
+&lt;table class="lntable">&lt;tr>&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code>&lt;span class="lnt">1
+&lt;/span>&lt;span class="lnt">2
+&lt;/span>&lt;span class="lnt">3
+&lt;/span>&lt;span class="lnt">4
+&lt;/span>&lt;/code>&lt;/pre>&lt;/td>
+&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code class="language-yaml" data-lang="yaml">&lt;span class="line">&lt;span class="cl">&lt;span class="nt">metadata&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>&lt;span class="nt">annotations&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>&lt;span class="nt">prometheus.io/port&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w"> &lt;/span>&lt;span class="s2">&amp;#34;9253&amp;#34;&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="w"> &lt;/span>&lt;span class="nt">prometheus.io/scrape&lt;/span>&lt;span class="p">:&lt;/span>&lt;span class="w"> &lt;/span>&lt;span class="s2">&amp;#34;true&amp;#34;&lt;/span>&lt;span class="w">
+&lt;/span>&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/td>&lt;/tr>&lt;/table>
+&lt;/div>
+&lt;/div>&lt;p>But in our Prometheus we don&amp;rsquo;t use the &lt;code>kubernetes-pods&lt;/code> &lt;a class="link" href="https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml#L998" target="_blank" rel="noopener"
+>scrape job config from the prometheus example&lt;/a>. meaning that these targets will not be discovered or scraped by prometheus. (And we don&amp;rsquo;t want to add and allow for scraping this way).&lt;/p>
+&lt;p>The &lt;a class="link" href="https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack" target="_blank" rel="noopener"
+>kube-prometheus-stack helm chart&lt;/a> comes with both a &lt;a class="link" href="https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/templates/exporters/core-dns/service.yaml" target="_blank" rel="noopener"
+>Service&lt;/a> and &lt;a class="link" href="https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/templates/exporters/core-dns/servicemonitor.yaml" target="_blank" rel="noopener"
+>ServiceMonitor&lt;/a> to scrape metrics from CoreDNS (which NodeLocal DNSCache uses).&lt;/p>
+&lt;p>However the Service and ServiceMonitor uses a hardcoded selector of &lt;code>k8s-app: kube-dns&lt;/code> while &lt;code>node-local-dns&lt;/code> Pods have &lt;code>k8s-app: node-local-dns&lt;/code>.&lt;/p>
+&lt;p>We made some changes to these and deployed them to the cluster and now started getting metrics in the &lt;code>coredns_dns_*&lt;/code> timeserieses.&lt;/p>
+&lt;blockquote>
+&lt;p>You can add our updated Service and ServiceMonitor like this:&lt;/p>
+&lt;div class="highlight">&lt;div class="chroma">
+&lt;table class="lntable">&lt;tr>&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code>&lt;span class="lnt">1
+&lt;/span>&lt;span class="lnt">2
+&lt;/span>&lt;/code>&lt;/pre>&lt;/td>
+&lt;td class="lntd">
+&lt;pre tabindex="0" class="chroma">&lt;code class="language-fallback" data-lang="fallback">&lt;span class="line">&lt;span class="cl">kubectl apply -f -n kube-system https://raw.githubusercontent.com/signicat/blog-attachements/main/2023-gke-node-local-dns-cache/files/node-local-dns-metrics-service.yaml
+&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">kubectl apply -f -n metrics https://raw.githubusercontent.com/signicat/blog-attachements/main/2023-gke-node-local-dns-cache/files/node-local-dns-servicemonitor.yaml
+&lt;/span>&lt;/span>&lt;/code>&lt;/pre>&lt;/td>&lt;/tr>&lt;/table>
+&lt;/div>
+&lt;/div>&lt;p>And metrics should start flowing within a couple of minutes.&lt;/p>
+&lt;/blockquote>
+&lt;p>In new versions of the &lt;a class="link" href="https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/templates/grafana/dashboards-1.14/k8s-coredns.yaml" target="_blank" rel="noopener"
+>CoreDNS dashboard&lt;/a> that comes with &lt;code>kube-prometheus-stack&lt;/code> you should be able to select the &lt;code>node-local-dns&lt;/code> job.&lt;/p>
+&lt;blockquote>
+&lt;p>I added the &lt;code>job&lt;/code> template variable to the dashboard in &lt;a class="link" href="https://github.com/prometheus-community/helm-charts/pull/3798" target="_blank" rel="noopener"
+>this PR&lt;/a>, which may not have made it into a new version of the &lt;code>kube-prometheus-stack&lt;/code> chart yet. In the mean time you can use &lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/grafana-dashboard-coredns.json" target="_blank" rel="noopener"
+>our updated CoreDNS dashboard&lt;/a> which adds the necessary template variable as well as a couple of other improvements.&lt;/p>
+&lt;/blockquote>
+&lt;p>&lt;a id="appendix-using-dnsperf">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---using-dnsperf-to-test-dns-performance">Appendix - Using dnsperf to test DNS performance
+&lt;/h2>&lt;p>Trying to tease out more information on the problem we run some DNS load testing using &lt;a class="link" href="https://linux.die.net/man/1/dnsperf" target="_blank" rel="noopener"
+>dnsperf&lt;/a>.&lt;/p>
+&lt;blockquote>
+&lt;p>An alternative to &lt;code>dnsperf&lt;/code> is &lt;a class="link" href="https://linux.die.net/man/1/resperf" target="_blank" rel="noopener"
+>resperf&lt;/a> which is &amp;ldquo;a companion tool to dnsperf&amp;rdquo; designed for testing resolution performance of a caching DNS server. Whereas &lt;code>dnsperf&lt;/code> is primarily meant to test authoritative DNS servers. Since &lt;code>resperf&lt;/code> is more complicated to work with, and we want to test at a fairly low volume, we assume that &lt;code>dnsperf&lt;/code> is good enough for now.&lt;/p>
+&lt;/blockquote>
+&lt;p>We spin up a new pod with Ubuntu to run dnsperf from&lt;/p>
+&lt;pre>&lt;code>kubectl run dnsperf -n default --image=ubuntu:22.04 -i --tty --restart=Never
+&lt;/code>&lt;/pre>
+&lt;p>And install dnsperf&lt;/p>
+&lt;pre>&lt;code>apt-get update &amp;amp;&amp;amp; apt-get install -y dnsperf
+&lt;/code>&lt;/pre>
+&lt;p>We&amp;rsquo;ll be testing three different destinations.&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>kube-dns&lt;/code> Service: First we use the IP of the &lt;code>kube-dns&lt;/code> Service (&lt;code>172.18.0.10&lt;/code>) which will be intercepted by the &lt;code>node-local-dns&lt;/code> Pod on the same node. It will do it&amp;rsquo;s caching and the traffic is visible in our modified CoreDNS Grafana dashboard for that node.&lt;/li>
+&lt;li>&lt;code>kube-dns-upstream&lt;/code> Service: Then we use the IP of the &lt;code>kube-dns-upstream&lt;/code> Service (&lt;code>172.18.165.139&lt;/code>) which is a copy of the &lt;code>kube-dns&lt;/code> Service that &lt;code>node-local-dns&lt;/code> uses when looking up &lt;code>.cluster.local&lt;/code> domains. It has a different IP than &lt;code>kube-dns&lt;/code> so that it won&amp;rsquo;t be intercepted by &lt;code>node-local-dns&lt;/code>.&lt;/li>
+&lt;li>One &lt;code>kube-dns&lt;/code> Pod: Then we use the IP of one specific &lt;code>kube-dns&lt;/code> Pod (&lt;code>172.20.14.115&lt;/code>) so that we can observe the behaviour of one instance without any load balancing sprinkling the traffic all over the place.&lt;/li>
+&lt;/ul>
+&lt;p>&lt;code>dnsperf&lt;/code> takes a list of domains to look up in a file that looks like&lt;/p>
+&lt;pre>&lt;code>archive.ubuntu.com A
+test.salesforce.com A
+storage.googleapis.com A
+&lt;/code>&lt;/pre>
+&lt;p>To create a file with the domains we actually look up I do a packet capture on one of the &lt;code>node-local-dns&lt;/code> Pods for half an hour. Open it in Wireshark. Filter by &lt;code>dns.flags.response == 1&lt;/code>. Add DNS -&amp;gt; Queries -&amp;gt; query -&amp;gt; Name as a Column. Export Packet Dissections as CSV. And use Excel and Notepad to get a file of 50.000 DNS names in that format. Upload that file to the newly created &lt;code>dnsperf&lt;/code> Pod. Create a separate file with only &lt;code>cluster.local&lt;/code> domains as well (&lt;code>cat domains-all.txt | grep &amp;quot;cluster.local&amp;quot; &amp;gt; domains-cluster-local.txt&lt;/code>).&lt;/p>
+&lt;blockquote>
+&lt;p>&lt;code>dnsperf&lt;/code> does not expand/multiply domains by adding the domains from &lt;code>search-path&lt;/code> in &lt;code>/etc/resolve.conf&lt;/code>. The list we extracted from the packet capture already have these additional lookups though so it is representative nonetheless.&lt;/p>
+&lt;/blockquote>
+&lt;p>Run dnsperf:&lt;/p>
+&lt;pre>&lt;code>dnsperf -d domains-all.txt -l 60 -Q 100 -S 5 -t 2 -s 172.18.0.10
+&lt;/code>&lt;/pre>
+&lt;p>Explanation of arguments:&lt;/p>
+&lt;ul>
+&lt;li>&lt;code>-d domains-all.txt&lt;/code> - Domain list file.&lt;/li>
+&lt;li>&lt;code>-l 60&lt;/code> - Length (duration) of test in seconds.&lt;/li>
+&lt;li>&lt;code>-Q 100&lt;/code> - Queries per second.&lt;/li>
+&lt;li>&lt;code>-S 5&lt;/code> - Print statistics every 5 seconds.&lt;/li>
+&lt;li>&lt;code>-t 2&lt;/code> - Timeout 2 seconds.&lt;/li>
+&lt;li>&lt;code>-s 172.18.0.18&lt;/code> - DNS server to query&lt;/li>
+&lt;/ul>
+&lt;p>Each test has different values for the arguments.&lt;/p>
+&lt;p>Results from running a series of tests ranging from 100 Queries per second (QPS) to 1500 QPS:&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/2023-12-14-table-load-tests.png"
+width="889"
+height="499"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/2023-12-14-table-load-tests_hu14351295037840062642.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/2023-12-14-table-load-tests_hu1398839472891939138.png 1024w"
+loading="lazy"
+alt="Load test results table"
+class="gallery-image"
+data-flex-grow="178"
+data-flex-basis="427px"
+>&lt;/p>
+&lt;blockquote>
+&lt;p>These results are from a second round of testing a couple of weeks after the first. On the first round I observed a lot (6%) timing out on just 200 QPS directly towards a &lt;code>kube-dns&lt;/code> Pod. I&amp;rsquo;m not sure why the results are suddenly much better. Looking at the graphs from &lt;code>node-local-dns&lt;/code> there is a significant improvement overall some days before the second round of testing. We have not done any changes that could explain the sudden improvement. I guess it&amp;rsquo;s just one of those things&amp;hellip;&lt;/p>
+&lt;p>CoreDNS did &lt;a class="link" href="https://coredns.io/2018/11/27/cluster-dns-coredns-vs-kube-dns/" target="_blank" rel="noopener"
+>a benchmark&lt;/a> of &lt;code>kube-dns&lt;/code> and &lt;code>CoreDNS&lt;/code> and managed to get ~36.000 QPS on internal names and ~2.200 QPS on external names on &lt;code>kube-dns&lt;/code>.&lt;/p>
+&lt;/blockquote>
+&lt;p>&lt;a id="appendix-network-packet-capture">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---network-packet-capture-without-dependencies">Appendix - Network packet capture without dependencies
+&lt;/h2>&lt;p>I haven&amp;rsquo;t done packet capture in a Kubernetes cluster before. First I tried &lt;a class="link" href="https://github.com/eldadru/ksniff" target="_blank" rel="noopener"
+>ksniff&lt;/a> that &lt;a class="link" href="https://anythingsimple.medium.com/how-to-do-network-sniff-for-kubernetes-pod-running-on-gke-fb23d0b63e95" target="_blank" rel="noopener"
+>this blog post describes&lt;/a>. But no dice.&lt;/p>
+&lt;blockquote>
+&lt;p>Another method that is much more reliable is running tcpdump in a &lt;a class="link" href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/#ephemeral-container" target="_blank" rel="noopener"
+>debug container&lt;/a> as mentioned &lt;a class="link" href="https://downey.io/blog/kubernetes-ephemeral-debug-container-tcpdump/" target="_blank" rel="noopener"
+>here&lt;/a>. He pipes tcpdump from a container directly to wireshark on his own machine. But since I&amp;rsquo;m using &lt;code>kubectl&lt;/code> etc inside Ubuntu on WSL2 on Windows that is probably going to require much more setup.&lt;/p>
+&lt;/blockquote>
+&lt;p>Instead I&amp;rsquo;m opting for just saving packet captures in the container as files and copy them to a directory on my machine accessible by Windows.&lt;/p>
+&lt;pre>&lt;code># Spin up a new container using the ubuntu:22.04 image in the existing node-local-dns-7vqpp Pod. Try to attach to the process-namespace of the node-cache container if possible.
+kubectl debug -c debug -n kube-system -it node-local-dns-7vqpp --image=ubuntu:22.04 --target=node-cache
+&lt;/code>&lt;/pre>
+&lt;p>As soon as the image is downloaded and container started your console should give you a new shell inside the container where we can start preparing:&lt;/p>
+&lt;pre>&lt;code># Update apt and install tshark. Enter &amp;quot;no&amp;quot; for &amp;quot;Should non-superusers be able to capture packets?&amp;quot;
+apt-get update &amp;amp;&amp;amp; apt-get install -y tshark
+# Capture 100 packets from eth0 to verify that things are working
+tshark -i eth0 -n -c 100
+&lt;/code>&lt;/pre>
+&lt;p>At first I captured 1 million packets without any filters. That resulted in a 6GB file which may be a bit on the large side when I&amp;rsquo;m just interested in some DNS lookups. So lets add a capture filter &lt;code>port 53&lt;/code> going forward.&lt;/p>
+&lt;p>Capturing DNS packets to and from a &lt;code>node-local-dns&lt;/code> Pod:&lt;/p>
+&lt;pre>&lt;code># In the shell running in the debug container with tshark installed:
+date; tshark -i eth0 -n -c 1000000 -f &amp;quot;port 53&amp;quot; -w node-local-dns-7vqpp-eth0.pcap
+&lt;/code>&lt;/pre>
+&lt;p>After either capturing 100.000 packets or I&amp;rsquo;m happy I stop the capture with &lt;code>Ctrl+C&lt;/code> and I can download the pcap file in WSL:&lt;/p>
+&lt;pre>&lt;code># On your local machine:
+kubectl cp -c debug kube-system/node-local-dns-7vqpp:node-local-dns-7vqpp-eth0.pcap /mnt/c/Data/node-local-dns-7vqpp-eth0.pcap
+&lt;/code>&lt;/pre>
+&lt;p>Then browse to &lt;code>C:\Data\&lt;/code> where you can open &lt;code>node-local-dns-7vqpp-eth0.pcap&lt;/code> in &lt;a class="link" href="https://www.wireshark.org/" target="_blank" rel="noopener"
+>Wireshark&lt;/a>.&lt;/p>
+&lt;blockquote>
+&lt;p>I print the current time on the Pod just before starting packet capture. Most of the time the correct UTC time will be recorded on the packets. But in case it isn&amp;rsquo;t and the time starts from 0, I can use that time to adjust the offset at least roughly. Making it easier to correlate packet captures from different Pods.&lt;/p>
+&lt;/blockquote>
+&lt;p>To capture on the receiving &lt;code>kube-dns&lt;/code> Pod, both incoming DNS traffic to the &lt;code>dnsmasq&lt;/code> container on port 53 on &lt;code>eth0&lt;/code>, and between &lt;code>dnsmasq&lt;/code> and &lt;code>kube-dns&lt;/code> containers on &lt;code>lo&lt;/code> port 10053:&lt;/p>
+&lt;pre>&lt;code>kubectl debug -c debug -n kube-system -it kube-dns-d7bc86d4c-d2x8p --image=ubuntu:22.04 --target=dnsmasq
+# Install tshark as shown above
+# Start two packet captures running in the background:
+date; tshark -i eth0 -n -c 1000000 -f &amp;quot;port 53&amp;quot; -w kube-dns-d7bc86d4c-d2x8p-eth0.pcap &amp;amp;
+date; tshark -i lo -n -c 1000000 -f &amp;quot;port 10053&amp;quot; -w kube-dns-d7bc86d4c-d2x8p-lo.pcap &amp;amp;
+# To stop these type `fg` in the shell to bring a background process to the foreground and stop it with `Ctrl+C`.
+# Then `fg` and `Ctrl+C` again to stop the other.
+&lt;/code>&lt;/pre>
+&lt;p>Download the files to my local machine as before:&lt;/p>
+&lt;pre>&lt;code>kubectl cp -c debug kube-system/kube-dns-d7bc86d4c-d2x8p:kube-dns-d7bc86d4c-d2x8p-eth0.pcap /mnt/c/Data/kube-dns-d7bc86d4c-d2x8p-eth0.pcap
+kubectl cp -c debug kube-system/kube-dns-d7bc86d4c-d2x8p:kube-dns-d7bc86d4c-d2x8p-lo.pcap /mnt/c/Data/kube-dns-d7bc86d4c-d2x8p-lo.pcap
+&lt;/code>&lt;/pre>
+&lt;p>&lt;em>Check out &lt;a class="link" href="#analyzing-dns-problems-based-on-packet-capture" >Analyzing DNS problems based on packet captures&lt;/a> for some tips and tricks on analyzing the packet captures.&lt;/em>&lt;/p>
+&lt;p>&lt;a id="appendix-verbose-logging-on-kube-dns">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---verbose-logging-on-kube-dns">Appendix - Verbose logging on &lt;code>kube-dns&lt;/code>
+&lt;/h2>&lt;p>The &lt;a class="link" href="https://dnsmasq.org/docs/dnsmasq-man.html" target="_blank" rel="noopener"
+>dnsmasq man page&lt;/a> lists several interesting options such as &lt;code>--log-queries=extra&lt;/code> and &lt;code>--log-debug&lt;/code>!&lt;/p>
+&lt;p>But it&amp;rsquo;s not possible to make changes to the &lt;code>kube-dns&lt;/code> Deployment since it&amp;rsquo;s managed by GKE. Any changes you make will be reverted immediately.&lt;/p>
+&lt;p>Instead we take the existing manifests for &lt;code>kube-dns&lt;/code>, modify them and create a parallel deployment that we control:&lt;/p>
+&lt;p>&lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/kube-dns-deployment.yaml" target="_blank" rel="noopener"
+>kube-dns-deployment.yaml&lt;/a>&lt;/p>
+&lt;ul>
+&lt;li>Deployment named &lt;code>kube-dns-debug&lt;/code>.&lt;/li>
+&lt;li>A couple of annotations commented out that would otherwise make the Deployment be instantly removed.&lt;/li>
+&lt;li>Keep existing &lt;code>k8s-app: kube-dns&lt;/code> label on the Pods so they will receive traffic for the &lt;code>kube-dns-upstream&lt;/code> Service.&lt;/li>
+&lt;li>An additional &lt;code>reason: debug&lt;/code> label on the Pods so we can target them specifically.&lt;/li>
+&lt;li>Additional logging enabled with &lt;code>--log-queries=extra&lt;/code>, &lt;code>--log-debug&lt;/code> and &lt;code>--log-async=25&lt;/code>. I enabled these one at a time but the log volume with everything enabled isn&amp;rsquo;t overwhelming.&lt;/li>
+&lt;/ul>
+&lt;p>&lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/kube-dns-debug-service.yaml" target="_blank" rel="noopener"
+>kube-dns-debug-service.yaml&lt;/a>&lt;/p>
+&lt;ul>
+&lt;li>Service named &lt;code>kube-dns-debug&lt;/code> with port udp+tcp/53 targeting only the Pods with the added &lt;code>reason: debug&lt;/code> label. I used this service to run load tests only towards these Pods.&lt;/li>
+&lt;/ul>
+&lt;p>&lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/kube-dns-metrics-service.yaml" target="_blank" rel="noopener"
+>kube-dns-metrics-service.yaml&lt;/a>&lt;/p>
+&lt;ul>
+&lt;li>Service named &lt;code>kube-dns-debug-metrics&lt;/code> with port tcp/10054 and tcp/10055 targeting the same Pods as above but for exposing metrics.&lt;/li>
+&lt;/ul>
+&lt;p>&lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/kube-dns-servicemonitor.yaml" target="_blank" rel="noopener"
+>kube-dns-servicemonitor.yaml&lt;/a>&lt;/p>
+&lt;ul>
+&lt;li>ServiceMonitor named &lt;code>kube-dns-debug&lt;/code> that targets the &lt;code>kube-dns-debug-metrics&lt;/code> Service above.&lt;/li>
+&lt;/ul>
+&lt;blockquote>
+&lt;p>Strictly speaking the &lt;code>kube-dns-debug&lt;/code> Service, &lt;code>kube-dns-debug-metrics&lt;/code> Service and &lt;code>kube-dns-debug&lt;/code> ServiceMonitor isn&amp;rsquo;t necessary if using the &lt;code>k8s-app: kube-dns&lt;/code> label on the new Pods. But it makes it possible to separate the two deployments completely by using another label on the Pods such as &lt;code>k8s-app: kube-dns-debug&lt;/code> and thus avoid for example load tests affecting real cluster DNS traffic.&lt;/p>
+&lt;/blockquote>
+&lt;p>Now some DNS requests should arrive at the &lt;code>kube-dns-debug&lt;/code> Pods with additional logging enabled.&lt;/p>
+&lt;p>It&amp;rsquo;s also possible to force all DNS traffic to this Pod by manually adding the &lt;code>reason: debug&lt;/code> label as a selector on the &lt;code>kube-dns-upstream&lt;/code> Service. It will stay that way for &amp;ldquo;a while&amp;rdquo; (hours, maybe days) before being reverted. Plenty of time to play around at least.&lt;/p>
+&lt;p>&lt;a id="appendix-analyzing-dnsmasq-logs">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---analyzing-dnsmasq-logs">Appendix - Analyzing &lt;code>dnsmasq&lt;/code> logs
+&lt;/h2>&lt;p>Once we have increased the log verbosity of &lt;code>dnsmasq&lt;/code> we can see if there&amp;rsquo;s anything to learn there.&lt;/p>
+&lt;p>First I used &lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/grafana-dashboard-coredns.json" target="_blank" rel="noopener"
+>our updated CoreDNS dashboard&lt;/a> to identify a time interval where we observed latency spikes. Then using loki, our centralized log storage, I download about 5000 lines of logs spanning about 50 seconds worth of logs. (Our loki is limited to loading 5000 lines, therefore it&amp;rsquo;s important to try to narrow down and find logs where we are actually experiencing issues).&lt;/p>
+&lt;pre>&lt;code>2023-10-10T10:02:36+02:00 I1010 08:02:36.571446 1 nanny.go:146] dnsmasq[4811]: 315207 10.0.0.83/56382 forwarded metadata.google.internal.cluster.local to 127.0.0.1#10053
+2023-10-10T10:02:36+02:00 I1010 08:02:36.571457 1 nanny.go:146] dnsmasq[4811]: 315207 10.0.0.83/56382 reply metadata.google.internal.cluster.local is NXDOMAIN
+2023-10-10T10:02:36+02:00 I1010 08:02:36.571488 1 nanny.go:146] dnsmasq[4810]: 315107 10.0.0.83/24595 forwarded metadata.google.internal.cluster.local to 127.0.0.1#10053
+2023-10-10T10:02:36+02:00 I1010 08:02:36.571495 1 nanny.go:146] dnsmasq[4810]: 315107 10.0.0.83/24595 reply metadata.google.internal.cluster.local is NXDOMAIN
+2023-10-10T10:02:36+02:00 I1010 08:02:36.575810 1 nanny.go:146] dnsmasq[4810]: 315108 10.0.0.83/24595 query[A] metadata.google.internal.some-namespace.svc.cluster.local from 10.0.0.83
+2023-10-10T10:02:36+02:00 I1010 08:02:36.576101 1 nanny.go:146] dnsmasq[4810]: 315108 10.0.0.83/24595 forwarded metadata.google.internal.some-namespace.svc.cluster.local to 127.0.0.1#10053
+2023-10-10T10:02:36+02:00 I1010 08:02:36.576132 1 nanny.go:146] dnsmasq[4810]: 315108 10.0.0.83/24595 reply metadata.google.internal.some-namespace.svc.cluster.local is NXDOMAIN
+&lt;/code>&lt;/pre>
+&lt;p>Here we can see exact time (&lt;code>08:02:36.571446&lt;/code>). Which &lt;code>dnsmasq&lt;/code> process logged the line, identified by the process ID (&lt;code>dnsmasq[4811]&lt;/code>). A number identifying an individual request (&lt;code>315207&lt;/code>). And the client IP and port (&lt;code>10.0.0.83/56382&lt;/code>). One process always maps to one TCP connection so PID and client IP and port will always match.&lt;/p>
+&lt;p>Just from this snippet we can see that multiple DNS requests are handled by each process and we have exact time for when individual requests were received from the client as well as exact time for replies.&lt;/p>
+&lt;p>I wrote a small (and ugly) &lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/analyze-dnsmasq-logs/main.go" target="_blank" rel="noopener"
+>program&lt;/a> to analyze the logs. It gathers the duration of each request identified by the request number and each &amp;ldquo;session&amp;rdquo; identified by the process ID.&lt;/p>
+&lt;p>It filters out requests faster than 2 milliseconds and sessions shorter than 500 milliseconds. The output looks like:&lt;/p>
+&lt;pre>&lt;code>Request: PID 5439 RequestNumber 356558 Domain . Duration 2.273ms
+Request: PID 4914 RequestNumber 319022 Domain api.statuspage.io.some-namespace.svc.cluster.local Duration 2.619ms
+Request: PID 4915 RequestNumber 319123 Domain api.statuspage.io.cluster.local Duration 3.088ms
+Session: PID 4890 Duration 1.005229s
+Session: PID 5022 Duration 852.861ms
+Session: PID 5435 Duration 2.627174s
+&lt;/code>&lt;/pre>
+&lt;p>The vast majority of individual requests complete in microseconds, and none are slower than 10 milliseconds. This is an indication that the delays aren&amp;rsquo;t coming from the processing of individual requests.&lt;/p>
+&lt;p>Sessions however last much longer, regularly in the 1-3 second range. This isn&amp;rsquo;t necessarily a problem since it&amp;rsquo;s resource efficient to keep sessions longer and re-using them for many requests.&lt;/p>
+&lt;p>&lt;a id="appendix-analyzing-concurrent-tcp-connections">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---analyzing-concurrent-tcp-connections">Appendix - Analyzing concurrent TCP connections
+&lt;/h2>&lt;p>I want to see how many connections are open at any point (and not impacted by metric scraping intervals etc) as well as how long they tend to stay idle before being closed.&lt;/p>
+&lt;p>I made another small (and probably even uglier) &lt;a class="link" href="https://github.com/signicat/blog-attachements/blob/main/2023-gke-node-local-dns-cache/files/analyze-tcp-conns/main.go" target="_blank" rel="noopener"
+>program&lt;/a> to analyze the packet captures (exported from Wireshark as CSV) from &lt;code>kube-dns&lt;/code> and try to answer those questions.&lt;/p>
+&lt;p>While iterating through every packet it keeps a counter on how many distinct connections are observed as well as the time since the previous packet in the same connection was observed:&lt;/p>
+&lt;pre>&lt;code>Time: 08:08:30.610010781 TimeShort: 08:08:30 Port: 61236 Action: open Result: none Flags: PSHACK IdleGroup: fast ConIdleTime: 564.26µs ActiveConnections: 11
+Time: 08:08:30.610206151 TimeShort: 08:08:30 Port: 10806 Action: open Result: none Flags: ACK IdleGroup: fast ConIdleTime: 178.4µs ActiveConnections: 11
+Time: 08:08:30.900267009 TimeShort: 08:08:30 Port: 62083 Action: open Result: none Flags: FINACK IdleGroup: slow ConIdleTime: 6.429595796s ActiveConnections: 11
+&lt;/code>&lt;/pre>
+&lt;p>Plotting &lt;code>ActiveConnections&lt;/code> in the Excel graph we have from &lt;a class="link" href="#analyzing-dns-problems-based-on-packet-capture" >Analyzing DNS problems based on packet captures&lt;/a>:&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-and-tcp-conns-and-packet-latency.png"
+width="1428"
+height="489"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-and-tcp-conns-and-packet-latency_hu6833197055541243622.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-proc-and-tcp-conns-and-packet-latency_hu1786475887642530671.png 1024w"
+loading="lazy"
+alt="Graph showing active TCP connections in green. DNS resolution time from packet captures in blue. Number of dnsmasq processes in orange"
+class="gallery-image"
+data-flex-grow="292"
+data-flex-basis="700px"
+>&lt;/p>
+&lt;p>Up to the limit of 20 &lt;code>dnsmasq&lt;/code> processes they follow the number of open TCP connections pretty closely. However for long periods of time there are way more open connections than &lt;code>dnsmasq&lt;/code> is allowed to spawn new child processes to handle. This also overlaps with the sudden huge increases in latency. Another thing we can infer from this is that new TCP connections are successfully being opened from &lt;code>node-local-dns&lt;/code> (CoreDNS) to &lt;code>dnsmasq&lt;/code>, even though &lt;code>dnsmasq&lt;/code> is unable to handle them yet. Probably the master &lt;code>dnsmasq&lt;/code> process accepts the connections but blocking the request until there is room to spawn a new child process.&lt;/p>
+&lt;p>&lt;code>grep&lt;/code>ing for &amp;ldquo;slow&amp;rdquo; we get all packets where the connection was idle for more than 1 second:&lt;/p>
+&lt;pre>&lt;code>Time: 08:08:18.064874738 TimeShort: 08:08:18 Port: 19956 Action: open Result: none Flags: FINACK IdleGroup: slow ConIdleTime: 7.535928188s ActiveConnections: 9
+Time: 08:08:18.064888758 TimeShort: 08:08:18 Port: 30168 Action: open Result: none Flags: FINACK IdleGroup: slow ConIdleTime: 7.577724318s ActiveConnections: 9
+Time: 08:08:18.064909758 TimeShort: 08:08:18 Port: 41718 Action: open Result: none Flags: FINACK IdleGroup: slow ConIdleTime: 7.393646609s ActiveConnections: 9
+Time: 08:08:18.064911088 TimeShort: 08:08:18 Port: 30386 Action: open Result: none Flags: FINACK IdleGroup: slow ConIdleTime: 7.535962768s ActiveConnections: 9
+Time: 08:08:18.064920468 TimeShort: 08:08:18 Port: 21482 Action: open Result: none Flags: FINACK IdleGroup: slow ConIdleTime: 7.535946008s ActiveConnections: 9
+&lt;/code>&lt;/pre>
+&lt;p>This is particularly interesting since &lt;code>node-local-dns&lt;/code> is configured to expire connections after 1 second. And in theory should be cleaned up after at most 2 seconds. I managed to keep myself from diving head first into that particular rabbit hole though.&lt;/p>
+&lt;blockquote>
+&lt;p>The underlying &lt;a class="link" href="https://github.com/miekg/dns/" target="_blank" rel="noopener"
+>dns Go library&lt;/a> that CoreDNS uses also has a &lt;a class="link" href="https://github.com/miekg/dns/blob/master/server.go#L18" target="_blank" rel="noopener"
+>limit of 128 DNS queries&lt;/a> for a single TCP connection before closing it.&lt;/p>
+&lt;/blockquote>
+&lt;p>&lt;a id="analyzing-dns-problems-based-on-packet-capture">&lt;/a>&lt;/p>
+&lt;h2 id="appendix---analyzing-dns-problems-based-on-packet-captures">Appendix - Analyzing DNS problems based on packet captures
+&lt;/h2>&lt;p>Now that we have some packet captures we can start dissecting and analyzing and looking for the needle in the haystack.&lt;/p>
+&lt;p>I&amp;rsquo;ll be using &lt;a class="link" href="https://www.wireshark.org/" target="_blank" rel="noopener"
+>Wireshark&lt;/a> for this.&lt;/p>
+&lt;p>&lt;a class="link" href="https://www.youtube.com/watch?v=RRjutHjGdCY" target="_blank" rel="noopener"
+>This youtube video&lt;/a> shows a few neat tricks. Thanks!&lt;/p>
+&lt;ul>
+&lt;li>If you are looking at the traffic between &lt;code>dnsmasq&lt;/code> and &lt;code>kube-dns&lt;/code> (&lt;code>lo&lt;/code> network interface) go to &lt;strong>Analyze&lt;/strong> -&amp;gt; &lt;strong>Decode&lt;/strong> as and add a mapping from port 10053 to DNS to have Wireshark decode the packets correctly.&lt;/li>
+&lt;li>Start by applying the display filter &lt;code>dns.flags.response == 1&lt;/code> to only show DNS responses.&lt;/li>
+&lt;li>Find a DNS Response packet and find the &lt;code>[Time: n.nnn seconds]&lt;/code> field, right click it and &lt;strong>Apply as Column&lt;/strong>.&lt;/li>
+&lt;li>You can also add &lt;code>Transaction ID&lt;/code> and the &lt;code>Name&lt;/code> field (under &lt;strong>Queries&lt;/strong>) as columns as well.&lt;/li>
+&lt;/ul>
+&lt;p>Then you can export as CSV for example in &lt;strong>File&lt;/strong> -&amp;gt; &lt;strong>Export Packet Dissections&amp;hellip;&lt;/strong> -&amp;gt; As &lt;strong>CSV&lt;/strong>.&lt;/p>
+&lt;p>Importing the data from the &lt;code>node-local-dns&lt;/code> packet capture into Excel (yes, there&amp;rsquo;s no way escaping Excel!) and plotting the duration of each and every DNS lookup over a 20 minute period, colored by upstream server:&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dns-lookup-time-by-upstream-server-over-time.png"
+width="1948"
+height="694"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dns-lookup-time-by-upstream-server-over-time_hu1554638069529912429.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dns-lookup-time-by-upstream-server-over-time_hu8836196662265939971.png 1024w"
+loading="lazy"
+alt="Graph showing DNS resolution time colored by upstream server based on packet captures on node-local-dns Pod"
+class="gallery-image"
+data-flex-grow="280"
+data-flex-basis="673px"
+>&lt;/p>
+&lt;p>We clearly see huge spikes in latency. But it seems to only affect queries being forwarded to the two &lt;code>kube-dns&lt;/code> Pods (&lt;code>172.20.1.38&lt;/code> &amp;amp; &lt;code>172.20.7.57&lt;/code>).&lt;/p>
+&lt;p>Another interesting finding is that it appears to happen at the exact same time on both &lt;code>kube-dns&lt;/code> Pods. Weird. If we didn&amp;rsquo;t already know that (for at least some queries) the added duration happens inside the &lt;code>dnsmasq&lt;/code> container, I would probably suspect a problem on the network.&lt;/p>
+&lt;p>Plotting the duration on requests arriving at &lt;code>dnsmasq&lt;/code> on one of the &lt;code>kube-dns&lt;/code> Pods shows the same pattern:&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-latency.png"
+width="1568"
+height="711"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-latency_hu12456545354413195016.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-latency_hu7087990665509006188.png 1024w"
+loading="lazy"
+alt="Graph showing DNS resolution time based on packet captures on kube-dns Pod"
+class="gallery-image"
+data-flex-grow="220"
+data-flex-basis="529px"
+>&lt;/p>
+&lt;p>Another thing I noticed is that sometimes close to when request duration would spike, Wireshark warns about &lt;code>TCP Port numbers reused&lt;/code>:&lt;/p>
+&lt;pre>&lt;code>42878 19:09:03.987437048 127.0.0.1 127.0.0.1 TCP 78 44516 [TCP Port numbers reused] 44516 → 10053 [SYN] Seq=0 Win=43690 Len=0
+&lt;/code>&lt;/pre>
+&lt;p>However Wireshark doesn&amp;rsquo;t discriminate whether that was 20 minutes or 2 seconds ago. Only that it occurs in the same packet capture.&lt;/p>
+&lt;p>One hypothesis I had was that outgoing requests from &lt;code>dnsmasq&lt;/code> to &lt;code>kube-dns&lt;/code> would be stuck waiting for available TCP ports. I plotted the source port usage over time:&lt;/p>
+&lt;p>&lt;img src="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-source-port.png"
+width="1569"
+height="695"
+srcset="https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-source-port_hu14734794848197582075.png 480w, https://blog.stian.omg.lol/p/kubernetes-dont-use-nodelocal-dnscache-on-gke-without-cloud-dns/dnsmasq-source-port_hu12858696458376013384.png 1024w"
+loading="lazy"
+alt="Graph showing TCP source port for connections from node-local-dns based on packet captures"
+class="gallery-image"
+data-flex-grow="225"
+data-flex-basis="541px"
+>&lt;/p>
+&lt;p>It did not strengthen my suspicion and some random checking shows that the TCP Port reuse is far enough spaced in time (minutes) to avoid problems. So for the time being I&amp;rsquo;m not digging further into this.&lt;/p>
+&lt;p>&lt;a id="footnotes">&lt;/a>&lt;/p>
+&lt;h1 id="footnotes">Footnotes
+&lt;/h1>&lt;p>&lt;a id="footnote-a">&lt;/a>
+&lt;strong>[A]&lt;/strong> This doesn&amp;rsquo;t strictly mean that 20 new TCP connections are required since many of them are probably retries.&lt;/p>
+&lt;p>&lt;a id="footnote-b">&lt;/a>
+&lt;strong>[B]&lt;/strong> Note that even if the graph doesn&amp;rsquo;t hit 22 you may still be affected. The number of processes is counted only at the exact time the metrics are scraped, in our case 10 seconds. You can manually sample the process count by attaching a debug container to &lt;code>dnsmasq&lt;/code> (&lt;code>kubectl debug -c debug -n kube-system -it kube-dns-6fb7c8866c-bxj7f --image=ubuntu:22.04 --target=dnsmasq&lt;/code>) and running &lt;code>for i in $(seq 1 1800) ; do echo &amp;quot;$(date) Try: ${i} DnsmasqProcess: $(pidof dnsmasq | wc -w)&amp;quot;; sleep 1; done&lt;/code>.&lt;/p>
+&lt;p>&lt;a id="footnote-c">&lt;/a>
+&lt;strong>[C]&lt;/strong> CPU throttling would not be an issue in this case since &lt;code>kube-dns&lt;/code> does not have CPU limits set.&lt;/p>
+&lt;p>&lt;a id="footnote-d">&lt;/a>
+&lt;strong>[D]&lt;/strong> Although you should be cautious of calling services by name in other namespaces if they are owned by different teams. As that introduces coupling on what should be implementation details across team boundaries. In Signicat we always call the full FQDN and path if connecting to services owned by other teams.&lt;/p></description></item></channel></rss>

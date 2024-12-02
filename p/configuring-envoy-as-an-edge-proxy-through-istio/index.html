@@ -1,0 +1,496 @@
+<!doctype html><html lang=en-us dir=ltr><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><meta name=description content="How we implemented Envoy edge proxy best practices in istio-ingressgateway."><title>Configuring Envoy as an edge proxy - through istio</title>
+<link rel=canonical href=https://blog.stian.omg.lol/p/configuring-envoy-as-an-edge-proxy-through-istio/><link rel=stylesheet href=/scss/style.min.663803bebe609202d5b39d848f2d7c2dc8b598a2d879efa079fa88893d29c49c.css><meta property='og:title' content="Configuring Envoy as an edge proxy - through istio"><meta property='og:description' content="How we implemented Envoy edge proxy best practices in istio-ingressgateway."><meta property='og:url' content='https://blog.stian.omg.lol/p/configuring-envoy-as-an-edge-proxy-through-istio/'><meta property='og:site_name' content='blog.stian.omg.lol'><meta property='og:type' content='article'><meta property='article:section' content='Post'><meta property='article:tag' content='kubernetes'><meta property='article:tag' content='istio'><meta property='article:published_time' content='2024-11-25T00:00:00+00:00'><meta property='article:modified_time' content='2024-11-25T00:00:00+00:00'><meta property='og:image' content='https://blog.stian.omg.lol/p/configuring-envoy-as-an-edge-proxy-through-istio/envoy-logo.svg'><meta name=twitter:title content="Configuring Envoy as an edge proxy - through istio"><meta name=twitter:description content="How we implemented Envoy edge proxy best practices in istio-ingressgateway."><meta name=twitter:card content="summary_large_image"><meta name=twitter:image content='https://blog.stian.omg.lol/p/configuring-envoy-as-an-edge-proxy-through-istio/envoy-logo.svg'><link rel="shortcut icon" href=/favicon.png></head><body class=article-page><script>(function(){const e="StackColorScheme";localStorage.getItem(e)||localStorage.setItem(e,"auto")})()</script><script>(function(){const t="StackColorScheme",e=localStorage.getItem(t),n=window.matchMedia("(prefers-color-scheme: dark)").matches===!0;e=="dark"||e==="auto"&&n?document.documentElement.dataset.scheme="dark":document.documentElement.dataset.scheme="light"})()</script><div class="container main-container flex on-phone--column extended"><aside class="sidebar left-sidebar sticky"><button class="hamburger hamburger--spin" type=button id=toggle-menu aria-label="Toggle Menu">
+<span class=hamburger-box><span class=hamburger-inner></span></span></button><header><figure class=site-avatar><a href=/><img src=/img/profile-picture_hu6892409687065925510.jpg width=300 height=300 class=site-logo loading=lazy alt=Avatar>
+</a><span class=emoji>🤷‍♂️</span></figure><div class=site-meta><h1 class=site-name><a href=/>blog.stian.omg.lol</a></h1><h2 class=site-description>Technology. Aviation. Philosophy.</h2></div></header><ol class=menu-social><li><a href=https://github.com/StianOvrevage target=_blank title=GitHub rel=me><svg class="icon icon-tabler icon-tabler-brand-github" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6.0 00-1.3-3.2 4.2 4.2.0 00-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3.0 00-6.2.0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2.0 00-.1 3.2A4.6 4.6.0 004 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></svg></a></li></ol><ol class=menu id=main-menu><li><a href=/><svg class="icon icon-tabler icon-tabler-home" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><polyline points="5 12 3 12 12 3 21 12 19 12"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/><path d="M9 21v-6a2 2 0 012-2h2a2 2 0 012 2v6"/></svg>
+<span>Home</span></a></li><li><a href=/archives/><svg class="icon icon-tabler icon-tabler-archive" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><rect x="3" y="4" width="18" height="4" rx="2"/><path d="M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+<span>Archives</span></a></li><li><a href=/search/><svg class="icon icon-tabler icon-tabler-search" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="10" cy="10" r="7"/><line x1="21" y1="21" x2="15" y2="15"/></svg>
+<span>Search</span></a></li><li><a href=/links/><svg class="icon icon-tabler icon-tabler-link" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><path d="M10 14a3.5 3.5.0 005 0l4-4a3.5 3.5.0 00-5-5l-.5.5"/><path d="M14 10a3.5 3.5.0 00-5 0l-4 4a3.5 3.5.0 005 5l.5-.5"/></svg>
+<span>Links</span></a></li><li class=menu-bottom-section><ol class=menu><li id=dark-mode-toggle><svg class="icon icon-tabler icon-tabler-toggle-left" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="8" cy="12" r="2"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>
+<svg class="icon icon-tabler icon-tabler-toggle-right" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="16" cy="12" r="2"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>
+<span>Dark Mode</span></li></ol></li></ol></aside><aside class="sidebar right-sidebar sticky"><section class="widget archives"><div class=widget-icon><svg class="icon icon-tabler icon-tabler-hash" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><line x1="5" y1="9" x2="19" y2="9"/><line x1="5" y1="15" x2="19" y2="15"/><line x1="11" y1="4" x2="7" y2="20"/><line x1="17" y1="4" x2="13" y2="20"/></svg></div><h2 class="widget-title section-title">Table of contents</h2><div class=widget--toc><nav id=TableOfContents><ol><li><a href=#appendix-a---displaying-currently-active-envoy-edge-configuration-settings>Appendix A - Displaying currently active Envoy edge configuration settings</a></li><li><a href=#appendix-b---overload-manager-metrics>Appendix B - Overload manager metrics</a></li><li><a href=#appendix-c---istio-installation-and-configuration-at-signicat>Appendix C - istio installation and configuration at Signicat</a></li></ol></nav></div></section></aside><main class="main full-width"><article class="has-image main-article"><header class=article-header><div class=article-image><a href=/p/configuring-envoy-as-an-edge-proxy-through-istio/><img src=/p/configuring-envoy-as-an-edge-proxy-through-istio/envoy-logo.svg loading=lazy alt="Featured image of post Configuring Envoy as an edge proxy - through istio"></a></div><div class=article-details><header class=article-category><a href=/categories/technology/ style=background-color:#2a9d8f;color:#fff>Technology</a></header><div class=article-title-wrapper><h2 class=article-title><a href=/p/configuring-envoy-as-an-edge-proxy-through-istio/>Configuring Envoy as an edge proxy - through istio</a></h2><h3 class=article-subtitle>How we implemented Envoy edge proxy best practices in istio-ingressgateway.</h3></div><footer class=article-time><div><svg class="icon icon-tabler icon-tabler-calendar-time" width="56" height="56" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><path d="M11.795 21H5a2 2 0 01-2-2V7a2 2 0 012-2h12a2 2 0 012 2v4"/><circle cx="18" cy="18" r="4"/><path d="M15 3v4"/><path d="M7 3v4"/><path d="M3 11h16"/><path d="M18 16.496V18l1 1"/></svg>
+<time class=article-time--published>Nov 25, 2024</time></div><div><svg class="icon icon-tabler icon-tabler-clock" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>
+<time class=article-time--reading>9 minute read</time></div></footer></div></header><section class=article-content><ul><li><a class=link href=#introduction>Introduction</a></li><li><a class=link href=#custom-bootstrap>Configuring overload manager and global connection limits using a custom Envoy bootstrap</a></li><li><a class=link href=#envoyfilter>Configuring buffer sizes and connection timeouts via EnvoyFilter</a></li><li><a class=link href=#appendices>Appendices</a><ul><li><a class=link href=#appendix-get-envoy-config>Appendix A - Displaying currently active Envoy edge configuration settings</a></li><li><a class=link href=#appendix-overload-manager-metrics>Appendix B - Overload manager metrics</a></li><li><a class=link href=#appendix-istio-at-signicat>Appendix C - istio installation and configuration at Signicat</a></li></ul></li><li><a class=link href=#outro>Outro</a></li></ul><p><em>This is a cross-post of a blog post also published on the <a class=link href>Signicat Blog</a></em></p><blockquote><p>We deployed this with Istio 1.23 and the Envoy edge proxy recommendations as of November 2024.</p></blockquote><p><a id=introduction></a></p><h1 id=introduction>Introduction</h1><p>If you are using istio as a Service Mesh for your Kubernetes clusters, chances are you are also using <code>istio-ingressgateway</code> to handle incoming traffic from the Internet.</p><p>Envoy however, which istio relies on, is not tuned for running at the edge by default:</p><blockquote><p>Envoy is a production-ready edge proxy, however, the default settings are tailored for the service mesh use case, and some values need to be adjusted when using Envoy as an edge proxy.<br>— <cite><a class=link href=https://www.envoyproxy.io/docs/envoy/latest/configuration/best_practices/edge target=_blank rel=noopener>envoyproxy.io/docs</a></cite></p></blockquote><p>The <a class=link href=https://www.envoyproxy.io/docs/envoy/latest/configuration/best_practices/edge target=_blank rel=noopener>Envoy edge proxy best practices</a> document outlines specific recommended configuration parameters for running envoy (and thus <code>istio-ingressgateway</code>) on the edge.</p><p>It&rsquo;s not immediately obvious how you would propagate these configurations through the regular istio installation and configuration procedures. There is an <a class=link href=https://github.com/istio/istio/issues/24715 target=_blank rel=noopener>open feature request on GitHub</a> asking for the ability to configure <code>istio-ingressgateway</code> according to best practices.</p><p>Here I&rsquo;ll show you at least one way of getting these settings deployed.</p><hr><p>We need two different approaches to achieve our goals. A <a class=link href=https://github.com/istio/istio/tree/master/samples/custom-bootstrap target=_blank rel=noopener>custom bootstrap configuration</a> and an <a class=link href=https://istio.io/latest/docs/reference/config/networking/envoy-filter/ target=_blank rel=noopener>EnvoyFilter</a>.</p><p><a id=custom-bootstrap></a></p><h1 id=configuring-overload-manager-and-global-connection-limits-using-a-custom-envoy-bootstrap>Configuring overload manager and global connection limits using a custom Envoy bootstrap</h1><p>To enable/configure <a class=link href=https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/operations/overload_manager target=_blank rel=noopener>Envoy overload manager</a> and global connection limits we first create our config file:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=lnt>53
+</span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span><span class=lnt>59
+</span><span class=lnt>60
+</span><span class=lnt>61
+</span><span class=lnt>62
+</span><span class=lnt>63
+</span><span class=lnt>64
+</span><span class=lnt>65
+</span><span class=lnt>66
+</span><span class=lnt>67
+</span><span class=lnt>68
+</span><span class=lnt>69
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-yaml data-lang=yaml><span class=line><span class=cl><span class=nt>apiVersion</span><span class=p>:</span><span class=w> </span><span class=l>v1</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>ConfigMap</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>metadata</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>istio-envoy-custom-bootstrap-config</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>namespace</span><span class=p>:</span><span class=w> </span><span class=l>istio-system</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>data</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>custom_bootstrap.yaml</span><span class=p>:</span><span class=w> </span><span class=p>|</span><span class=sd>
+</span></span></span><span class=line><span class=cl><span class=sd>    # Untrusted downstreams:
+</span></span></span><span class=line><span class=cl><span class=sd>    overload_manager:
+</span></span></span><span class=line><span class=cl><span class=sd>      refresh_interval: 0.25s
+</span></span></span><span class=line><span class=cl><span class=sd>      resource_monitors:
+</span></span></span><span class=line><span class=cl><span class=sd>      - name: &#34;envoy.resource_monitors.fixed_heap&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>        typed_config:
+</span></span></span><span class=line><span class=cl><span class=sd>          &#34;@type&#34;: type.googleapis.com/envoy.extensions.resource_monitors.fixed_heap.v3.FixedHeapConfig
+</span></span></span><span class=line><span class=cl><span class=sd>          max_heap_size_bytes: 350000000 # 350000000=350MB
+</span></span></span><span class=line><span class=cl><span class=sd>      - name: &#34;envoy.resource_monitors.global_downstream_max_connections&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>        typed_config:
+</span></span></span><span class=line><span class=cl><span class=sd>          &#34;@type&#34;: type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+</span></span></span><span class=line><span class=cl><span class=sd>          max_active_downstream_connections: 25000
+</span></span></span><span class=line><span class=cl><span class=sd>      actions:
+</span></span></span><span class=line><span class=cl><span class=sd>      # Possible actions: https://www.envoyproxy.io/docs/envoy/latest/configuration/operations/overload_manager/overload_manager#overload-actions
+</span></span></span><span class=line><span class=cl><span class=sd>      - name: &#34;envoy.overload_actions.shrink_heap&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>        triggers:
+</span></span></span><span class=line><span class=cl><span class=sd>        - name: &#34;envoy.resource_monitors.fixed_heap&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>          threshold:
+</span></span></span><span class=line><span class=cl><span class=sd>            value: 0.9
+</span></span></span><span class=line><span class=cl><span class=sd>      - name: &#34;envoy.overload_actions.stop_accepting_requests&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>        triggers:
+</span></span></span><span class=line><span class=cl><span class=sd>        - name: &#34;envoy.resource_monitors.fixed_heap&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>          threshold:
+</span></span></span><span class=line><span class=cl><span class=sd>            value: 0.95
+</span></span></span><span class=line><span class=cl><span class=sd>      # Additional settings from https://www.envoyproxy.io/docs/envoy/latest/configuration/operations/overload_manager/overload_manager
+</span></span></span><span class=line><span class=cl><span class=sd>      - name: &#34;envoy.overload_actions.disable_http_keepalive&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>        triggers:
+</span></span></span><span class=line><span class=cl><span class=sd>          - name: &#34;envoy.resource_monitors.fixed_heap&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>            threshold:
+</span></span></span><span class=line><span class=cl><span class=sd>              value: 0.95
+</span></span></span><span class=line><span class=cl><span class=sd>      # From https://www.envoyproxy.io/docs/envoy/latest/configuration/operations/overload_manager/overload_manager#reducing-timeouts
+</span></span></span><span class=line><span class=cl><span class=sd>      - name: &#34;envoy.overload_actions.reduce_timeouts&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>        triggers:
+</span></span></span><span class=line><span class=cl><span class=sd>          - name: &#34;envoy.resource_monitors.fixed_heap&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>            scaled:
+</span></span></span><span class=line><span class=cl><span class=sd>              scaling_threshold: 0.85
+</span></span></span><span class=line><span class=cl><span class=sd>              saturation_threshold: 0.95
+</span></span></span><span class=line><span class=cl><span class=sd>        typed_config:
+</span></span></span><span class=line><span class=cl><span class=sd>          &#34;@type&#34;: type.googleapis.com/envoy.config.overload.v3.ScaleTimersOverloadActionConfig
+</span></span></span><span class=line><span class=cl><span class=sd>          timer_scale_factors:
+</span></span></span><span class=line><span class=cl><span class=sd>            - timer: HTTP_DOWNSTREAM_CONNECTION_IDLE
+</span></span></span><span class=line><span class=cl><span class=sd>              min_timeout: 2s
+</span></span></span><span class=line><span class=cl><span class=sd>      # https://www.envoyproxy.io/docs/envoy/latest/configuration/operations/overload_manager/overload_manager#load-shed-points
+</span></span></span><span class=line><span class=cl><span class=sd>      loadshed_points:
+</span></span></span><span class=line><span class=cl><span class=sd>        - name: &#34;envoy.load_shed_points.tcp_listener_accept&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>          triggers:
+</span></span></span><span class=line><span class=cl><span class=sd>            - name: &#34;envoy.resource_monitors.fixed_heap&#34;
+</span></span></span><span class=line><span class=cl><span class=sd>              threshold:
+</span></span></span><span class=line><span class=cl><span class=sd>                value: 0.95
+</span></span></span><span class=line><span class=cl><span class=sd>    # From https://www.envoyproxy.io/docs/envoy/latest/configuration/best_practices/edge#best-practices-edge / https://www.envoyproxy.io/docs/envoy/latest/configuration/listeners/runtime#config-listeners-runtime
+</span></span></span><span class=line><span class=cl><span class=sd>    # Also mentioned in https://istio.io/latest/news/security/istio-security-2020-007/#mitigation with much higher limits
+</span></span></span><span class=line><span class=cl><span class=sd>    # Here we configure one limit for the &#34;regular&#34; public listener on port 8443 and a separate global limit that is higher to
+</span></span></span><span class=line><span class=cl><span class=sd>    # avoid starving connections for admin and metrics and probes
+</span></span></span><span class=line><span class=cl><span class=sd>    layered_runtime:
+</span></span></span><span class=line><span class=cl><span class=sd>      layers:
+</span></span></span><span class=line><span class=cl><span class=sd>      - name: static_layer_0
+</span></span></span><span class=line><span class=cl><span class=sd>        static_layer:
+</span></span></span><span class=line><span class=cl><span class=sd>          envoy:
+</span></span></span><span class=line><span class=cl><span class=sd>            resource_limits:
+</span></span></span><span class=line><span class=cl><span class=sd>              listener:
+</span></span></span><span class=line><span class=cl><span class=sd>                0.0.0.0_8443:
+</span></span></span><span class=line><span class=cl><span class=sd>                  connection_limit: 10000</span><span class=w>    
+</span></span></span></code></pre></td></tr></table></div></div><p>Let&rsquo;s save it to <code>istio-envoy-custom-bootstrap-config.yaml</code>.</p><p><strong>There is a field here you MUST adjust to your environment.</strong> That is the <code>max_heap_size_bytes</code> which we set to about 90% of the configured K8s memory limit.</p><p>What this does is inform the overload manager of how much memory it has available, and is used for evaluating percentage of current usage compared to what it thinks it has available, that again triggers overload actions at certain thresholds.</p><p>You may also have to adjust the second to last line (<code>0.0.0.0_8443</code>) in case your public listener is named something else.</p><p>Now we install it in the cluster:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-bash data-lang=bash><span class=line><span class=cl>kubectl apply -n istio-system -f istio-envoy-custom-bootstrap-config.yaml
+</span></span></code></pre></td></tr></table></div></div><p>Then we can use an <a class=link href=https://istio.io/latest/docs/setup/additional-setup/customize-installation/ target=_blank rel=noopener>overlay</a> to modify the Deployment that <code>istioctl</code> produces, before <code>istioctl</code> actually installs it in the cluster. This is the path and contents of what you need to add to your existing IstioOperator that you feed to <code>istioctl</code>:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-yaml data-lang=yaml><span class=line><span class=cl><span class=nt>apiVersion</span><span class=p>:</span><span class=w> </span><span class=l>install.istio.io/v1alpha1</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>IstioOperator</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>spec</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>components</span><span class=p>:</span><span class=w>        
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>ingressGateways</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>istio-ingressgateway</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>k8s</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>overlays</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span>- <span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>Deployment</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>istio-ingressgateway</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>patches</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                </span>- <span class=nt>path</span><span class=p>:</span><span class=w> </span><span class=l>spec.template.spec.containers.[name:istio-proxy].env[-1]</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                  </span><span class=nt>value</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                    </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>ISTIO_BOOTSTRAP_OVERRIDE</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                    </span><span class=nt>value</span><span class=p>:</span><span class=w> </span><span class=l>/etc/istio/custom-bootstrap/custom_bootstrap.yaml</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                </span>- <span class=nt>path</span><span class=p>:</span><span class=w> </span><span class=l>spec.template.spec.containers.[name:istio-proxy].volumeMounts[-1]</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                  </span><span class=nt>value</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                    </span><span class=nt>mountPath</span><span class=p>:</span><span class=w> </span><span class=l>/etc/istio/custom-bootstrap</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                    </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>custom-bootstrap-volume</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                    </span><span class=nt>readOnly</span><span class=p>:</span><span class=w> </span><span class=kc>true</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                </span>- <span class=nt>path</span><span class=p>:</span><span class=w> </span><span class=l>spec.template.spec.volumes[-1]</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                  </span><span class=nt>value</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                    </span><span class=nt>configMap</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                      </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>istio-envoy-custom-bootstrap-config</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                      </span><span class=nt>defaultMode</span><span class=p>:</span><span class=w> </span><span class=m>420</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                      </span><span class=nt>optional</span><span class=p>:</span><span class=w> </span><span class=kc>false</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>                    </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>custom-bootstrap-volume</span><span class=w>
+</span></span></span></code></pre></td></tr></table></div></div><blockquote><p>Huge shoutout to our eminent <a class=link href=https://www.linkedin.com/in/csaba-k%C3%A1rp%C3%A1ti-4a229086/ target=_blank rel=noopener>Csaba Kárpáti</a> which helped me out actually getting the overlay above work.</p></blockquote><p><a id=envoyfilter></a></p><h1 id=configuring-buffer-sizes-and-connection-timeouts-via-envoyfilter>Configuring buffer sizes and connection timeouts via EnvoyFilter</h1><p>We set the rest of the recommended configurations via an EnvoyFilter.</p><p>Create a file for it, named <code>listener-filters-edge.yaml</code> for example:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-yaml data-lang=yaml><span class=line><span class=cl><span class=c># Based on recommendations for edge deployments with untrusted downstreams:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=c># - https://www.envoyproxy.io/docs/envoy/latest/configuration/best_practices/edge#best-practices-edge</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=c># - https://www.envoyproxy.io/docs/envoy/latest/faq/configuration/timeouts#faq-configuration-timeouts</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>apiVersion</span><span class=p>:</span><span class=w> </span><span class=l>networking.istio.io/v1alpha3</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>EnvoyFilter</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>metadata</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>listener-filters-edge</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>spec</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>workloadSelector</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>labels</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>istio</span><span class=p>:</span><span class=w> </span><span class=l>ingressgateway</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>configPatches</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span>- <span class=nt>applyTo</span><span class=p>:</span><span class=w> </span><span class=l>LISTENER</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>match</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>context</span><span class=p>:</span><span class=w> </span><span class=l>GATEWAY</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>patch</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>operation</span><span class=p>:</span><span class=w> </span><span class=l>MERGE</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>value</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>per_connection_buffer_limit_bytes</span><span class=p>:</span><span class=w> </span><span class=m>32768</span><span class=w> </span><span class=c># Doc examples 32 KiB # Default 1MB</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span>- <span class=nt>applyTo</span><span class=p>:</span><span class=w> </span><span class=l>NETWORK_FILTER</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>match</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>context</span><span class=p>:</span><span class=w> </span><span class=l>GATEWAY</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>listener</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>filterChain</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>filter</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;envoy.filters.network.http_connection_manager&#34;</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span><span class=nt>patch</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>operation</span><span class=p>:</span><span class=w> </span><span class=l>MERGE</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>value</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=s2>&#34;envoy.filters.network.http_connection_manager&#34;</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>typed_config</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>&#34;@type&#34;: </span><span class=s2>&#34;type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager&#34;</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=c># https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/network/http_connection_manager/v3/http_connection_manager.proto#envoy-v3-api-field-extensions-filters-network-http-connection-manager-v3-httpconnectionmanager-request-headers-timeout</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>request_headers_timeout</span><span class=p>:</span><span class=w> </span><span class=l>10s                        </span><span class=w> </span><span class=c># Default no timeout</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=c># https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/protocol.proto#envoy-v3-api-msg-config-core-v3-http1protocoloptions</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>common_http_protocol_options</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>max_connection_duration</span><span class=p>:</span><span class=w> </span><span class=l>60s                       </span><span class=w> </span><span class=c># Default no timeout</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>idle_timeout</span><span class=p>:</span><span class=w> </span><span class=l>900s                                 </span><span class=w> </span><span class=c># Default 1 hour. Doc example 900s</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>headers_with_underscores_action</span><span class=p>:</span><span class=w> </span><span class=l>REJECT_REQUEST</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=c># https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/protocol.proto#config-core-v3-http2protocoloptions</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>http2_protocol_options</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>max_concurrent_streams</span><span class=p>:</span><span class=w> </span><span class=m>100</span><span class=w>                         </span><span class=c># Default 2147483647</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>initial_stream_window_size</span><span class=p>:</span><span class=w> </span><span class=m>65536</span><span class=w>                   </span><span class=c># Doc examples 64 KiB - Default 268435456 (256 * 1024 * 1024)</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>              </span><span class=nt>initial_connection_window_size</span><span class=p>:</span><span class=w> </span><span class=m>1048576</span><span class=w>             </span><span class=c># Doc examples 1 MiB - Same default as initial_stream_window_size</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=c># https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/network/http_connection_manager/v3/http_connection_manager.proto.html#extensions-filters-network-http-connection-manager-v3-httpconnectionmanager</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>stream_idle_timeout</span><span class=p>:</span><span class=w> </span><span class=l>300s              </span><span class=w> </span><span class=c># Default 5 mins. Must be disabled for long-lived and streaming requests</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>request_timeout</span><span class=p>:</span><span class=w> </span><span class=l>300s                  </span><span class=w> </span><span class=c># Default no timeout. Must be disabled for long-lived and streaming requests</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>use_remote_address</span><span class=p>:</span><span class=w> </span><span class=kc>true</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>normalize_path</span><span class=p>:</span><span class=w> </span><span class=kc>true</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>merge_slashes</span><span class=p>:</span><span class=w> </span><span class=kc>true</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>path_with_escaped_slashes_action</span><span class=p>:</span><span class=w> </span><span class=l>UNESCAPE_AND_REDIRECT</span><span class=w>
+</span></span></span></code></pre></td></tr></table></div></div><p>And install it like usual:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-bash data-lang=bash><span class=line><span class=cl>kubectl apply -n istio-system -f listener-filters-edge.yaml
+</span></span></code></pre></td></tr></table></div></div><p><a id=appendices></a></p><h1 id=appendices>Appendices</h1><p><a id=appendix-get-envoy-config></a></p><h2 id=appendix-a---displaying-currently-active-envoy-edge-configuration-settings>Appendix A - Displaying currently active Envoy edge configuration settings</h2><p>Here is a handy script for printing the currently active settings to console. Useful for verifying the changes have actually made it all the way to Envoy.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=lnt>53
+</span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span><span class=lnt>59
+</span><span class=lnt>60
+</span><span class=lnt>61
+</span><span class=lnt>62
+</span><span class=lnt>63
+</span><span class=lnt>64
+</span><span class=lnt>65
+</span><span class=lnt>66
+</span><span class=lnt>67
+</span><span class=lnt>68
+</span><span class=lnt>69
+</span><span class=lnt>70
+</span><span class=lnt>71
+</span><span class=lnt>72
+</span><span class=lnt>73
+</span><span class=lnt>74
+</span><span class=lnt>75
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-bash data-lang=bash><span class=line><span class=cl><span class=nv>CONFIG_FILE</span><span class=o>=</span>igw_config.json
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>echo</span> <span class=s2>&#34;Looking for pods labeled istio=ingressgateway&#34;</span>
+</span></span><span class=line><span class=cl><span class=nv>ISTIO_INGRESSGATEWAY_POD</span><span class=o>=</span><span class=k>$(</span>kubectl get pods -n istio-system -l <span class=nv>istio</span><span class=o>=</span>ingressgateway -o <span class=nv>jsonpath</span><span class=o>=</span><span class=s1>&#39;{.items[0].metadata.name}&#39;</span><span class=k>)</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>echo</span> <span class=s2>&#34;Using </span><span class=nv>$ISTIO_INGRESSGATEWAY_POD</span><span class=s2> and dumping configuration to </span><span class=nv>$CONFIG_FILE</span><span class=s2>&#34;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl>kubectl <span class=nb>exec</span> -n istio-system <span class=nv>$ISTIO_INGRESSGATEWAY_POD</span> curl http://localhost:15000/config_dump &gt; <span class=nv>$CONFIG_FILE</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>echo</span> <span class=s2>&#34;Custom bootstrap configuration: &#34;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;bootstrap.overload_manager.refresh_interval: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq -r <span class=s1>&#39;.configs[0].bootstrap.overload_manager.refresh_interval&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;max_active_downstream_connections: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.resource_monitors[] | select(.name == &#34;envoy.resource_monitors.global_downstream_max_connections&#34;) | .typed_config.max_active_downstream_connections&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;max_heap_size_bytes: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.resource_monitors[] | select(.name == &#34;envoy.resource_monitors.fixed_heap&#34;) | .typed_config.max_heap_size_bytes&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;overload_actions.shrink_heap: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.actions[] | select(.name == &#34;envoy.overload_actions.shrink_heap&#34;) | .triggers[0].threshold.value&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;overload_actions.stop_accepting_requests: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.actions[] | select(.name == &#34;envoy.overload_actions.stop_accepting_requests&#34;) | .triggers[0].threshold.value&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;overload_actions.disable_http_keepalive: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.actions[] | select(.name == &#34;envoy.overload_actions.disable_http_keepalive&#34;) | .triggers[0].threshold.value&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;overload_actions.reduce_timeouts scaling_threshold: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.actions[] | select(.name == &#34;envoy.overload_actions.reduce_timeouts&#34;) | .triggers[0].scaled.scaling_threshold&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;overload_actions.reduce_timeouts saturation_threshold: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.actions[] | select(.name == &#34;envoy.overload_actions.reduce_timeouts&#34;) | .triggers[0].scaled.saturation_threshold&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;overload_actions.reduce_timeouts timer_scale_factors timer: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.actions[] | select(.name == &#34;envoy.overload_actions.reduce_timeouts&#34;) | .typed_config.timer_scale_factors[0].timer&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;overload_actions.reduce_timeouts timer_scale_factors min_timeout: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.actions[] | select(.name == &#34;envoy.overload_actions.reduce_timeouts&#34;) | .typed_config.timer_scale_factors[0].min_timeout&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;load_shed_points.tcp_listener_accept: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.overload_manager.loadshed_points[] | select(.name == &#34;envoy.load_shed_points.tcp_listener_accept&#34;) | .triggers[0].threshold.value&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;resource_limits.0.0.0.0_8443.connection_limit: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[0].bootstrap.layered_runtime.layers[] | select(.name == &#34;static_layer_0&#34;) | .static_layer.envoy.resource_limits.listener.&#34;0.0.0.0_8443&#34;.connection_limit&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>echo</span> <span class=s2>&#34;EnvoyFilter configuration: &#34;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;per_connection_buffer_limit_bytes: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.per_connection_buffer_limit_bytes&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;http2_protocol_options.max_concurrent_streams: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.http2_protocol_options.max_concurrent_streams&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;http2_protocol_options.initial_stream_window_size: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.http2_protocol_options.initial_stream_window_size&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;http2_protocol_options.initial_connection_window_size: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.http2_protocol_options.initial_connection_window_size&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;stream_idle_timeout: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.stream_idle_timeout&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;request_timeout: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.request_timeout&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;common_http_protocol_options.idle_timeout: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.common_http_protocol_options.idle_timeout&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;common_http_protocol_options.max_connection_duration: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.common_http_protocol_options.max_connection_duration&#39;</span>
+</span></span><span class=line><span class=cl>
+</span></span><span class=line><span class=cl><span class=nb>printf</span> <span class=s2>&#34;request_headers_timeout: &#34;</span>
+</span></span><span class=line><span class=cl>cat <span class=nv>$CONFIG_FILE</span> <span class=p>|</span> jq <span class=s1>&#39;.configs[2].dynamic_listeners[] | select(.name == &#34;0.0.0.0_8443&#34;) | .active_state.listener.filter_chains[0].filters[0].typed_config.request_headers_timeout&#39;</span>
+</span></span></code></pre></td></tr></table></div></div><p>Save it to <code>get-edge-config-values.sh</code> and run it with for example <code>bash get-edge-config-values.sh</code>.</p><p><a id=appendix-overload-manager-metrics></a></p><h2 id=appendix-b---overload-manager-metrics>Appendix B - Overload manager metrics</h2><p>Envoy can also export metrics related to overload manager, they can be enabled by adding <code>overload</code> to approximately this location in the <code>IstioOperator</code> spec:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre tabindex=0 class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span></code></pre></td><td class=lntd><pre tabindex=0 class=chroma><code class=language-yaml data-lang=yaml><span class=line><span class=cl><span class=nt>apiVersion</span><span class=p>:</span><span class=w> </span><span class=l>install.istio.io/v1alpha1</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>kind</span><span class=p>:</span><span class=w> </span><span class=l>IstioOperator</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w></span><span class=nt>spec</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>  </span><span class=nt>components</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>    </span><span class=nt>ingressGateways</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>      </span>- <span class=nt>name</span><span class=p>:</span><span class=w> </span><span class=l>istio-ingressgateway</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>        </span><span class=nt>k8s</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>          </span><span class=nt>podAnnotations</span><span class=p>:</span><span class=w>
+</span></span></span><span class=line><span class=cl><span class=w>            </span><span class=nt>proxy.istio.io/config</span><span class=p>:</span><span class=w> </span><span class=p>|-</span><span class=sd>
+</span></span></span><span class=line><span class=cl><span class=sd>              proxyStatsMatcher:
+</span></span></span><span class=line><span class=cl><span class=sd>                inclusionPrefixes:
+</span></span></span><span class=line><span class=cl><span class=sd>                - &#34;overload&#34;</span><span class=w>              
+</span></span></span></code></pre></td></tr></table></div></div><p><a id=appendix-istio-at-signicat></a></p><h2 id=appendix-c---istio-installation-and-configuration-at-signicat>Appendix C - istio installation and configuration at Signicat</h2><p>At Signicat we use <a class=link href=https://helm.sh/ target=_blank rel=noopener>helm</a> to template all resources going in to our istio installation. That includes resource types like:</p><ul><li>IstioOperator</li><li>EnvoyFilters</li><li>ConfigMaps</li><li>Gateways</li><li>Sidecars
+and so on.</li></ul><p>We don&rsquo;t use <code>helm</code> to install anything. Only to generate a set of manifests that is then used as inputs to the appropriate tools, like feeding generated <code>IstioOperator</code> manifests to <code>istioctl</code> and <code>EnvoyFilter</code> manifests to <code>kubectl</code>.</p><p>This works fairly well and allows us to have the same set of base manifests with adjustable values and feature sets per environment and using standard <code>helm</code> that most platform engineers are already familiar with.</p><p>We also have a couple of other tricks to enable us to have zero-downtime blue-green upgrades to <code>istio-ingressgateway</code> that we may cover in a future post.</p><p><a id=outro></a></p><h1 id=outro>Outro</h1><p>I hope this was helpful on your journey towards scale, resilience and reliability.</p><p>The next chapter in this saga would be once we complete extensive load testing with the new configurations compared to the defaults as well as trying to find optimal values. And associated Grafana dashboards are always nice!</p></section><footer class=article-footer><section class=article-tags><a href=/tags/kubernetes/>Kubernetes</a>
+<a href=/tags/istio/>Istio</a></section><section class=article-lastmod><svg class="icon icon-tabler icon-tabler-clock" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentcolor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z"/><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>
+<span>Last updated on Nov 25, 2024 00:00 UTC</span></section></footer></article><div class=disqus-container></div><style>.disqus-container{background-color:var(--card-background);border-radius:var(--card-border-radius);box-shadow:var(--shadow-l1);padding:var(--card-padding)}</style><script>window.addEventListener("onColorSchemeChange",e=>{typeof DISQUS=="object"&&DISQUS.reset({reload:!0})})</script><footer class=site-footer><section class=copyright>&copy;
+2014 -
+2024 blog.stian.omg.lol</section><section class=powerby>Built with <a href=https://gohugo.io/ target=_blank rel=noopener>Hugo</a><br>Theme <b><a href=https://github.com/CaiJimmy/hugo-theme-stack target=_blank rel=noopener data-version=3.29.0>Stack</a></b> designed by <a href=https://jimmycai.com target=_blank rel=noopener>Jimmy</a></section></footer><div class=pswp tabindex=-1 role=dialog aria-hidden=true><div class=pswp__bg></div><div class=pswp__scroll-wrap><div class=pswp__container><div class=pswp__item></div><div class=pswp__item></div><div class=pswp__item></div></div><div class="pswp__ui pswp__ui--hidden"><div class=pswp__top-bar><div class=pswp__counter></div><button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+<button class="pswp__button pswp__button--share" title=Share></button>
+<button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+<button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button><div class=pswp__preloader><div class=pswp__preloader__icn><div class=pswp__preloader__cut><div class=pswp__preloader__donut></div></div></div></div></div><div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap"><div class=pswp__share-tooltip></div></div><button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+</button>
+<button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)"></button><div class=pswp__caption><div class=pswp__caption__center></div></div></div></div></div><script src=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.js integrity="sha256-ePwmChbbvXbsO02lbM3HoHbSHTHFAeChekF1xKJdleo=" crossorigin=anonymous defer></script><script src=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe-ui-default.min.js integrity="sha256-UKkzOn/w1mBxRmLLGrSeyB4e1xbrp4xylgAWb3M42pU=" crossorigin=anonymous defer></script><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/default-skin/default-skin.min.css crossorigin=anonymous><link rel=stylesheet href=https://cdn.jsdelivr.net/npm/photoswipe@4.1.3/dist/photoswipe.min.css crossorigin=anonymous></main></div><script src=https://cdn.jsdelivr.net/npm/node-vibrant@3.1.6/dist/vibrant.min.js integrity="sha256-awcR2jno4kI5X0zL8ex0vi2z+KMkF24hUW8WePSA9HM=" crossorigin=anonymous></script><script type=text/javascript src=/ts/main.1e9a3bafd846ced4c345d084b355fb8c7bae75701c338f8a1f8a82c780137826.js defer></script><script>(function(){const e=document.createElement("link");e.href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap",e.type="text/css",e.rel="stylesheet",document.head.appendChild(e)})()</script></body></html>
